@@ -31,14 +31,14 @@ Account (подписка, администратор данных)
 | `accounts` | id, type (`individual`/`business`), plan, locale, timezone, sms_included, status | Единица подписки и ответственности по RODO. |
 | `users` | id, account_id, email, role (`owner`,`staff`,`assistant`), auth data | Роли: см. ниже. |
 | `locations` | id, account_id, name, address, public_slug | |
-| `location_memberships` | location_id, member_account_id, status (`invited`,`active`,`ended`), shared_calendar_scope, started_at, ended_at | Для Independent. |
+| `location_memberships` | location_id, location_account_id, member_account_id, status (`invited`,`active`,`ended`), shared_calendar_scope (`busy_only`), started_at, ended_at | Для Independent. RLS: видят обе стороны (салон и мастер). |
 | `staff` | id, account_id, user_id?, display_name, public_slug, vertical_template | Публичная страница link-in-bio. |
 | `services` | id, account_id, name_i18n, category, deposit_mode, cancel_policy_id, requires_manual_confirm, cost_price | `cost_price` для расчёта маржи (MVP). |
 | `service_variants` | id, service_id, name_i18n, duration_min, buffer_min, price, custom_fields_schema | Варианты: длина волос, размер питомца, размер татуировки. |
 | `staff_services` | staff_id, service_id, override_duration?, override_price? | |
 | `working_hours` | staff_id, weekday, start, end | |
 | `time_blocks` | staff_id, range, reason | Обед, отпуск, личное. |
-| `clients` | id, account_id, name, phone (шифр.), email?, language, trust_level, anonymized_at? | Уникальность телефона только внутри Account. |
+| `clients` | id, account_id, name, phone_encrypted, phone_hash, email?, language, trust_level, anonymized_at? | Телефон шифруется приложением; `phone_hash` (HMAC) для поиска и blacklist. Уникальность только внутри Account. |
 | `client_notes` | id, client_id, account_id, body_encrypted, sensitivity (`normal`,`health`), created_at | `health` только при наличии согласия. |
 | `consents` | id, client_id, account_id, type (`privacy`,`terms`,`health`,`marketing`), text_version, given_at, ip_hash, revoked_at | |
 | `policies` | id, account_id, version, free_cancel_hours, max_reschedules, deposit_on_late_cancel (`keep`,`transfer`,`refund`), texts_i18n | Версионируется, бронь хранит ссылку на конкретную версию. |
@@ -59,7 +59,7 @@ Account (подписка, администратор данных)
 |---|---|
 | `id`, `account_id`, `staff_id`, `client_id`, `service_id`, `variant_id` | Связи. |
 | `starts_at`, `ends_at`, `buffer_min` | Время. |
-| `slot` | `tstzrange(starts_at, ends_at + буфер, '[)')`, вычисляется приложением, участвует в ограничении. |
+| `slot` | `tstzrange(starts_at, ends_at + буфер, '[)')`, вычисляется триггером БД (D-039), участвует в ограничении. |
 | `capacity` | По умолчанию 1. Для групповых занятий (v2) > 1. |
 | `status` | `pending`, `confirmed`, `rejected`, `expired`, `cancelled_by_client`, `cancelled_by_master`, `completed`, `no_show`, `rescheduled`. |
 | `hold_expires_at` | Только для `pending`. |

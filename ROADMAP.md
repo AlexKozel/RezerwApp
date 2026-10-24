@@ -5,6 +5,16 @@
 
 ## Sprint 0. Основы
 
+**Статус (2026-10-24):**
+- [x] Monorepo (pnpm), TypeScript, CI (`.github/workflows/ci.yml`), `docker-compose.yml`.
+- [x] Миграция `0001_init.sql`: схема, EXCLUDE от двойной записи, RLS FORCE, роли и права. Проверено на PostgreSQL 16: `scripts/verify-db.sh`, 43 проверки, включая гонку 20 параллельных заявок.
+- [x] `packages/shared`: машина статусов, границы резервационной оплаты, i18n PL/UK/RU/EN, нормализация телефона. 23 теста.
+- [x] `apps/api`: доступ к БД с контекстом Account, раннер миграций, `BookingsService` (создание, переходы, освобождение hold), Nest-каркас с `/health`.
+- [ ] Тесты `apps/api` (интеграционные, `node:test` + `pg`) написаны, но запущены только в CI/у владельца: в сессии разработки был недоступен npm. SQL всех запросов сервиса проверен вручную на PostgreSQL 16.
+- [ ] Закоммитить `pnpm-lock.yaml` после первого `pnpm install`, перейти на `--frozen-lockfile`.
+- [ ] Спайк iOS (gate G1), хостинг в ЕС, юридика (L-01).
+- [ ] Не сделано в Sprint 0: шифрование полей (envelope), HMAC-хеш телефона в `apps/api`, функция входа до выбора Account (RLS на `users`), seed юридических текстов.
+
 - Репозиторий (monorepo: `apps/widget`, `apps/pwa`, `apps/api`, `packages/shared`), CI, окружения dev/staging.
 - Хостинг в ЕС, домены, секреты.
 - Модель данных и миграции: Account, Location, Staff, Service, Variant, Booking с ограничением от пересечений, RLS.

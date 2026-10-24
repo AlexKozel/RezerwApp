@@ -27,6 +27,25 @@
 | `UNIT_ECONOMICS.md` | Цена, SMS, расчёты, допущения. |
 | `ROADMAP.md` | Этапы MVP / v1.1 / v2, критерии готовности, alpha-тест. |
 
+## Разработка (Sprint 0)
+
+Нужны Node 22+, pnpm 10, PostgreSQL 16 (или Docker) и `psql`.
+
+```bash
+pnpm install                 # создаст pnpm-lock.yaml: закоммитьте его
+docker compose up -d         # PostgreSQL 16 и Redis (или свой PostgreSQL)
+cp .env.example .env
+pnpm build                   # shared, затем api
+pnpm db:migrate              # применяет apps/api/migrations ролью-мигратором
+psql "$MIGRATOR_DATABASE_URL" -c "ALTER ROLE rezerwapp_app LOGIN PASSWORD 'rezerwapp_app'"
+pnpm typecheck
+pnpm test                    # нужен PostgreSQL: TEST_PG_ADMIN_URL (по умолчанию localhost, rezerwapp/rezerwapp)
+pnpm verify:db               # гонки, EXCLUDE, RLS и права на живой БД, без Node
+```
+
+Структура: `apps/api` (NestJS, миграции, сервис записей), `packages/shared` (статусы записи, i18n PL/UK/RU/EN,
+нормализация телефона), `scripts/verify-db.sh` (проверка БД), `.github/workflows/ci.yml`.
+
 ## Как начинать новую рабочую сессию с Claude
 
 Claude не хранит память между чатами. Каждую сессию начинать так:
