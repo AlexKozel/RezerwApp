@@ -267,6 +267,11 @@ export class BookingsService {
 
   /** Фоновая задача: переводит просроченные pending в expired. Возвращает число освобождённых слотов. */
   async expireStaleHolds(accountId: string): Promise<number> {
+    return (await this.expireStale(accountId)).length;
+  }
+
+  /** То же, что expireStaleHolds, но возвращает id истёкших записей (для уведомления клиентов). */
+  async expireStale(accountId: string): Promise<string[]> {
     return this.db.withAccount(accountId, async (client) => {
       const result = await client.query<{ booking_id: string }>(
         `WITH expired AS (
@@ -279,7 +284,28 @@ export class BookingsService {
          SELECT account_id, id, 'status_changed', 'system', '{"from":"pending","to":"expired"}'::jsonb FROM expired
          RETURNING booking_id`,
       );
-      return result.rowCount ?? 0;
+      return result.rows.map((r) => r.booking_id);
+    });
+  }
+
+  /**
+   * Заявки pending без ответа мастера дольше olderThanMin минут, о которых ещё не напоминали (D-017).
+   * Отметка «напомнили» пишется событием master_reminded в той же транзакции, поэтому напоминание уходит
+   * один раз; SKIP LOCKED не даёт двум воркерам взять одну заявку.
+   */
+  async markReminders(accountId: string, olderThanMin: number): Promise<Array<{ bookingId: string; staffId: string }>> {
+    return this.db.withAccount(accountId, async (client) => {
+      const due = await client.query<{ id: string; staff_id: string }>(
+        `SELECT b.id, b.staff_id FROM bookings b
+          WHERE b.status = 'pending' AND b.hold_expires_at > now()
+            AND b.created_at <= now() - make_interval(mins => $1::int)
+            AND NOT EXISTS (SELECT 1 FROM booking_events e WHERE e.booking_id = b.id AND e.type = 'master_reminded')
+          ORDER BY b.created_at
+          FOR UPDATE OF b SKIP LOCKED`,
+        [olderThanMin],
+      );
+      for (const row of due.rows) await addEvent(client, accountId, row.id, 'master_reminded', 'system', {});
+      return due.rows.map((r) => ({ bookingId: r.id, staffId: r.staff_id }));
     });
   }
 }

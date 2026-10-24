@@ -20,6 +20,8 @@ export const TEST_CONFIG: AppConfig = {
   fieldMasterKey: Buffer.alloc(32, 7),
   alphaOtpCode: TEST_OTP,
   cookieSecure: false,
+  // Фоновые задачи проверяются отдельно (jobs.test.ts), здесь они мешали бы детерминированности.
+  workers: false,
 };
 
 export interface TestApp {
