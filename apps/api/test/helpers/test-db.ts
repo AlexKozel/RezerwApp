@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
-import { Db } from '../../src/db/db';
+import { Db, createPool } from '../../src/db/db';
 import { migrate } from '../../src/db/migrate';
 
 const ADMIN_URL = process.env.TEST_PG_ADMIN_URL ?? 'postgres://rezerwapp:rezerwapp@localhost:5432/postgres';
@@ -39,7 +39,7 @@ export async function createTestDb(name: string): Promise<TestDb> {
   await migrate(admin);
   await admin.query("ALTER ROLE rezerwapp_app LOGIN PASSWORD 'rezerwapp_app'");
 
-  const app = new Db(new Pool({ connectionString: withCredentials(adminUrl, 'rezerwapp_app', 'rezerwapp_app'), max: 20 }));
+  const app = new Db(createPool(withCredentials(adminUrl, 'rezerwapp_app', 'rezerwapp_app'), 20));
 
   return {
     admin,

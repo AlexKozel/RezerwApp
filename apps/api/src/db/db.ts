@@ -3,7 +3,13 @@ import { Pool, type PoolClient } from 'pg';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function createPool(connectionString: string, max = 10): Pool {
-  return new Pool({ connectionString, max });
+  const pool = new Pool({ connectionString, max });
+  // Обрыв простаивающего соединения (рестарт или failover БД) пул сообщает событием 'error'.
+  // Без обработчика Node завершает процесс; с ним пул отбрасывает соединение и откроет новое.
+  pool.on('error', (error) => {
+    console.error(`pg pool: idle client error: ${error.message}`);
+  });
+  return pool;
 }
 
 /**
