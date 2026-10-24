@@ -27,9 +27,9 @@
 | `UNIT_ECONOMICS.md` | Цена, SMS, расчёты, допущения. |
 | `ROADMAP.md` | Этапы MVP / v1.1 / v2, критерии готовности, alpha-тест. |
 
-## Разработка (Sprint 0)
+## Разработка
 
-Нужны Node 22+, pnpm 10, PostgreSQL 16 (или Docker) и `psql`.
+Нужны Node 22+, pnpm 10, PostgreSQL 16 и Redis 7 (или Docker) и `psql`.
 
 ```bash
 pnpm install --frozen-lockfile
@@ -40,10 +40,27 @@ pnpm build                   # shared, затем api
 pnpm db:migrate              # применяет apps/api/migrations ролью-мигратором
 psql "$MIGRATOR_DATABASE_URL" -c "ALTER ROLE rezerwapp_app LOGIN PASSWORD 'rezerwapp_app'"
 pnpm typecheck
-pnpm test                    # нужен PostgreSQL: TEST_PG_ADMIN_URL (по умолчанию localhost, rezerwapp/rezerwapp)
+pnpm test                    # PostgreSQL (TEST_PG_ADMIN_URL) и Redis (TEST_REDIS_URL, по умолчанию localhost:6380)
 pnpm verify:db               # гонки, EXCLUDE, RLS и права на живой БД, без Node
-pnpm --filter @rezerwapp/api start   # затем: curl localhost:3000/health → {"status":"ok"}
+pnpm --filter @rezerwapp/api start   # затем: curl localhost:$PORT/health → {"status":"ok"}
 ```
+
+Доступ мастеру в alpha выдаётся вручную (D-005), публичной регистрации нет. Пароль читается из stdin
+или `MASTER_PASSWORD`, чтобы не попасть в историю shell:
+
+```bash
+pnpm create-master --email anna@example.pl --account "Anna Nails" --slug anna-nails --name "Anna"
+```
+
+Перед первой публичной записью в `consent_documents` должны быть опубликованы Regulamin (`terms`) и политика
+(`privacy`) хотя бы на польском, иначе запись вернёт `LEGAL_TEXTS_MISSING`.
+
+API (все ответы JSON, ошибки вида `{"error": "CODE"}`):
+
+| Кто | Эндпоинты |
+|---|---|
+| Мастер (cookie `rz_sid`) | `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`; `GET/POST /staff`; `GET/POST /policies`; `GET/POST /services`, `PATCH /services/:id`, `POST /services/:id/variants`, `PATCH /variants/:id`; `PUT/DELETE /staff/:id/services/:serviceId`; `GET/PATCH /staff/:id/settings`; `GET/PUT /staff/:id/working-hours`; `POST /staff/:id/days-off`; `GET/POST /staff/:id/time-blocks`, `DELETE /staff/:id/time-blocks/:blockId`; `GET /staff/:id/slots`; `GET /bookings`, `POST /bookings/:id/transition` |
+| Клиент (без входа) | `GET /public/staff/:slug`, `GET /public/staff/:slug/slots?variantId&from&to`, `POST /public/otp`, `POST /public/staff/:slug/bookings` |
 
 Без локального `psql` (например, на Windows) psql и проверку БД можно запустить в контейнере:
 
@@ -53,8 +70,9 @@ docker run --rm --network rezerwapp_default -v "$PWD:/repo:ro" \
   -e PG_ADMIN_URL=postgres://rezerwapp:rezerwapp@postgres:5432/postgres postgres:16 bash /repo/scripts/verify-db.sh
 ```
 
-Структура: `apps/api` (NestJS, миграции, сервис записей), `packages/shared` (статусы записи, i18n PL/UK/RU/EN,
-нормализация телефона), `scripts/verify-db.sh` (проверка БД), `.github/workflows/ci.yml`.
+Структура: `apps/api` (NestJS: миграции; модули `auth`, `catalog`, `availability`, `bookings`, `clients`,
+`public`; `crypto` для паролей, HMAC телефона и шифрования полей), `packages/shared` (статусы записи, i18n
+PL/UK/RU/EN, нормализация телефона), `scripts/verify-db.sh` (проверка БД), `.github/workflows/ci.yml`.
 
 ## Как начинать новую рабочую сессию с Claude
 
