@@ -57,9 +57,11 @@ pnpm create-master --email anna@example.pl --account "Anna Nails" --slug anna-na
 
 API (все ответы JSON, ошибки вида `{"error": "CODE"}`):
 
-| Кто | Эндпоинты |
+| Кто (роли D-047) | Эндпоинты |
 |---|---|
-| Мастер (cookie `rz_sid`) | `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`; `GET/POST /staff`; `GET/POST /policies`; `GET/POST /services`, `PATCH /services/:id`, `POST /services/:id/variants`, `PATCH /variants/:id`; `PUT/DELETE /staff/:id/services/:serviceId`; `GET/PATCH /staff/:id/settings`; `GET/PUT /staff/:id/working-hours`; `POST /staff/:id/days-off`; `GET/POST /staff/:id/time-blocks`, `DELETE /staff/:id/time-blocks/:blockId`; `GET /staff/:id/slots`; `GET /bookings`, `POST /bookings/:id/transition` |
+| Любой вошедший (cookie `rz_sid`) | `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`, `POST /auth/password`; чтение `GET /staff`, `/policies`, `/services` |
+| owner | `GET/POST /users`, `PATCH/DELETE /users/:id`; `GET/PATCH /account/payment` (BLIK, D-048); `POST /staff`, `POST /policies`, `POST /services`, `PATCH /services/:id`, `POST /services/:id/variants`, `PATCH /variants/:id`, `PUT/DELETE /staff/:id/services/:serviceId` |
+| owner, assistant (все специалисты); staff (только свой) | `GET /staff/:id/settings` (`PATCH` без assistant); `GET/PUT /staff/:id/working-hours`; `POST /staff/:id/days-off`; `GET/POST /staff/:id/time-blocks`, `DELETE /staff/:id/time-blocks/:blockId`; `GET /staff/:id/slots`; `GET /bookings`, `POST /bookings/:id/transition` |
 | Клиент (без входа) | `GET /public/staff/:slug`, `GET /public/staff/:slug/slots?variantId&from&to`, `POST /public/otp`, `POST /public/staff/:slug/bookings` |
 
 Без локального `psql` (например, на Windows) psql и проверку БД можно запустить в контейнере:
