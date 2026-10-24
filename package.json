@@ -10,7 +10,8 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "verify:db": "bash scripts/verify-db.sh",
-    "db:migrate": "pnpm --filter @rezerwapp/api migrate"
+    "db:migrate": "pnpm --filter @rezerwapp/api migrate",
+    "create-master": "pnpm --filter @rezerwapp/api create-master"
   },
   "devDependencies": {
     "typescript": "^5.9.0"
