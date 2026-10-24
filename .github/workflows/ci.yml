@@ -38,9 +38,7 @@ jobs:
           node-version: 22
           cache: pnpm
 
-      # Пока pnpm-lock.yaml не закоммичен, фиксированная установка невозможна.
-      # После первого локального `pnpm install` закоммитьте lock-файл и замените на --frozen-lockfile.
-      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm install --frozen-lockfile
 
       - run: pnpm build
       - run: pnpm typecheck
