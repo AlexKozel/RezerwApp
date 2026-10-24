@@ -52,6 +52,9 @@ pnpm --filter @rezerwapp/api start   # затем: curl localhost:$PORT/health �
 pnpm create-master --email anna@example.pl --account "Anna Nails" --slug anna-nails --name "Anna"
 ```
 
+Фоновые задачи (истечение hold, напоминание мастеру, D-049) по умолчанию работают в процессе API.
+Для отдельного процесса: API с `WORKERS=false` и `pnpm --filter @rezerwapp/api worker`.
+
 Перед первой публичной записью в `consent_documents` должны быть опубликованы Regulamin (`terms`) и политика
 (`privacy`) хотя бы на польском, иначе запись вернёт `LEGAL_TEXTS_MISSING`.
 
