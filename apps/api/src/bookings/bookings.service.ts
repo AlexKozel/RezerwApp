@@ -57,6 +57,8 @@ export interface TransitionInput {
 
 const DEFAULT_HOLD_MINUTES = 120;
 const EXCLUSION_VIOLATION = '23P01';
+/** Пространство ключей advisory-блокировок записей (727001 занят раннером миграций). */
+const BOOKING_LOCK_NAMESPACE = 727002;
 
 interface BookingRow {
   id: string;
@@ -158,6 +160,11 @@ export class BookingsService {
     const startsAt = input.startsAt;
     const endsAt = new Date(startsAt.getTime() + variantRow.duration_min * 60_000);
     const slotEnd = new Date(endsAt.getTime() + variantRow.buffer_min * 60_000);
+
+    // Параллельные вставки пересекающихся слотов ждут друг друга на EXCLUDE и могут попасть в deadlock
+    // (клиент получил бы ошибку 500 через секунды). Блокировка на специалиста до конца транзакции ставит их
+    // в очередь: следующая видит закоммиченную запись и получает обычное «слот занят». EXCLUDE остаётся гарантией.
+    await client.query('SELECT pg_advisory_xact_lock($1, hashtext($2))', [BOOKING_LOCK_NAMESPACE, input.staffId]);
 
     const released = await client.query<{ id: string }>(
       `UPDATE bookings
