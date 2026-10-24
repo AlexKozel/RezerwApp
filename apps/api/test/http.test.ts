@@ -101,6 +101,19 @@ describe('HTTP: мастер настраивает запись, клиент �
       assert.equal((await master.post('/staff', { displayName: 'X', publicSlug: 'Bad Slug!' })).status, 400);
     });
 
+    test('услугу с оплатой BLIK нельзя создать без номера BLIK у Account (D-048)', async () => {
+      const service = { name: { pl: 'X' }, prepaymentMethod: 'manual_blik', depositMode: 'fixed', depositValue: 10, variants: [{ durationMin: 60, price: 100 }] };
+      const r = await master.post('/services', service);
+      assert.equal(r.status, 400);
+      assert.ok(r.body.details.prepaymentMethod);
+      assert.equal((await master.patch('/account/payment', { blikPhone: '+48 600-700-800' })).status, 200);
+      assert.deepEqual((await master.patch('/account/payment', { recipient: 'Anna Kowalska' })).body, {
+        blikPhone: '+48600700800',
+        recipient: 'Anna Kowalska',
+      });
+      assert.equal((await master.patch('/account/payment', { blikPhone: '12' })).status, 400);
+    });
+
     test('политика отмен версионируется', async () => {
       assert.equal((await master.post('/policies', { freeCancelHours: 24 })).body.version, 1);
       assert.equal((await master.post('/policies', { freeCancelHours: 48 })).body.version, 2);
@@ -222,9 +235,9 @@ describe('HTTP: мастер настраивает запись, клиент �
       assert.equal(r.status, 201);
       assert.equal(r.body.status, 'pending');
       assert.ok(r.body.holdExpiresAt);
-      assert.equal(r.body.bookingFee.amount, 30);
-      assert.equal(r.body.bookingFee.method, 'manual_blik');
-      assert.match(r.body.bookingFee.code, /^[A-HJKMNP-Z2-9]{4}$/);
+      const { code, ...fee } = r.body.bookingFee;
+      assert.deepEqual(fee, { amount: 30, method: 'manual_blik', blikPhone: '+48600700800', recipient: 'Anna Kowalska' });
+      assert.match(code, /^[A-HJKMNP-Z2-9]{4}$/);
       const pr = await db.admin.query('SELECT amount, status FROM payment_requests WHERE booking_id = $1', [r.body.bookingId]);
       assert.deepEqual(pr.rows, [{ amount: '30.00', status: 'requested' }]);
     });
@@ -263,6 +276,12 @@ describe('HTTP: мастер настраивает запись, клиент �
       const again = await book({ serviceId: serviceB.id, variantId: serviceB.variants[0]!.id, startsAt: at(day, 15), phone: '700000001' });
       assert.equal(again.body.status, 'confirmed');
       assert.equal(again.body.bookingFee, null);
+    });
+
+    test('номер BLIK нельзя стереть, пока услуги требуют оплату BLIK', async () => {
+      const r = await master.patch('/account/payment', { blikPhone: null });
+      assert.equal(r.status, 400);
+      assert.ok(r.body.details.blikPhone);
     });
 
     test('выход отзывает сессию на сервере', async () => {

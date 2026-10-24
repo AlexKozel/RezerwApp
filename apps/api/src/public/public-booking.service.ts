@@ -1,6 +1,7 @@
 import { randomInt } from 'node:crypto';
 import { normalizePhone, type BookingStatus, type DepositMode, type Locale } from '@rezerwapp/shared';
 import type { PoolClient } from 'pg';
+import { readPayment } from '../accounts/account-settings.service';
 import type { AvailabilityService } from '../availability/availability.service';
 import type { BookingsService } from '../bookings/bookings.service';
 import type { CatalogService } from '../catalog/catalog.service';
@@ -39,7 +40,8 @@ export interface PublicBookingResult {
   startsAt: Date;
   endsAt: Date;
   holdExpiresAt: Date | null;
-  bookingFee: { amount: number; code: string; method: string } | null;
+  /** Инструкция оплаты (BOOKING_FLOW.md, раздел 4): сумма, код для комментария, номер BLIK и получатель. */
+  bookingFee: { amount: number; code: string; method: string; blikPhone: string | null; recipient: string | null } | null;
 }
 
 interface ServiceTerms {
@@ -211,6 +213,9 @@ export class PublicBookingService {
     const amount = Math.round(Math.min(raw, price / 2) * 100) / 100;
     if (amount <= 0) return null;
     const mode = terms.prepayment_method === 'provider_link' ? 'provider_link' : 'manual_blik';
+    const payment = await readPayment(client);
+    // Каталог не даёт сохранить такую услугу без номера (D-048), но номер могли стереть напрямую в БД.
+    if (mode === 'manual_blik' && !payment.blikPhone) throw new ConflictError('PAYMENT_NOT_CONFIGURED', 'BLIK phone is not set');
     for (let attempt = 0; attempt < 10; attempt += 1) {
       const code = paymentCode();
       const inserted = await client.query(
@@ -218,7 +223,7 @@ export class PublicBookingService {
          ON CONFLICT (account_id, code) DO NOTHING`,
         [accountId, bookingId, mode, amount, code],
       );
-      if (inserted.rowCount === 1) return { amount, code, method: mode };
+      if (inserted.rowCount === 1) return { amount, code, method: mode, blikPhone: payment.blikPhone, recipient: payment.recipient };
     }
     throw new Error('could not allocate a unique payment code');
   }

@@ -1,11 +1,15 @@
 import { Global, Inject, Injectable, Module, type OnApplicationShutdown } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { Redis } from 'ioredis';
+import { AccountController } from './accounts/account.controller';
+import { AccountSettingsService } from './accounts/account-settings.service';
 import { APP_CONFIG, OTP_VERIFIER, REDIS } from './app.tokens';
+import { StaffAccess } from './auth/access';
 import { AuthController } from './auth/auth.controller';
 import { SessionGuard } from './auth/auth.guard';
 import { AuthService } from './auth/auth.service';
 import { SessionStore } from './auth/session-store';
+import { UsersService } from './auth/users.service';
 import { AvailabilityController } from './availability/availability.controller';
 import { AvailabilityService } from './availability/availability.service';
 import { BookingsController } from './bookings/bookings.controller';
@@ -37,7 +41,15 @@ class RedisShutdown implements OnApplicationShutdown {
 
 @Global()
 @Module({
-  controllers: [HealthController, AuthController, CatalogController, AvailabilityController, BookingsController, PublicController],
+  controllers: [
+    HealthController,
+    AuthController,
+    AccountController,
+    CatalogController,
+    AvailabilityController,
+    BookingsController,
+    PublicController,
+  ],
   providers: [
     { provide: APP_CONFIG, useFactory: () => loadConfig() },
     { provide: APP_FILTER, useClass: AppErrorFilter },
@@ -60,6 +72,9 @@ class RedisShutdown implements OnApplicationShutdown {
     SessionGuard,
     { provide: BookingsService, useFactory: (db: DbService) => new BookingsService(db), inject: [DbService] },
     { provide: CatalogService, useFactory: (db: DbService) => new CatalogService(db), inject: [DbService] },
+    { provide: StaffAccess, useFactory: (db: DbService) => new StaffAccess(db), inject: [DbService] },
+    { provide: UsersService, useFactory: (db: DbService) => new UsersService(db), inject: [DbService] },
+    { provide: AccountSettingsService, useFactory: (db: DbService) => new AccountSettingsService(db), inject: [DbService] },
     { provide: AvailabilityService, useFactory: (db: DbService) => new AvailabilityService(db), inject: [DbService] },
     {
       provide: ClientsService,
