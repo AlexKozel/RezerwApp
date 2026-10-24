@@ -119,91 +119,107 @@ export class BookingsService {
    * Просроченные hold, мешающие этому слоту, освобождаются в той же транзакции.
    */
   async create(input: CreateBookingInput): Promise<Booking> {
+    return this.db.withAccount(input.accountId, (client) => this.createIn(client, input));
+  }
+
+  /** То же, что create, внутри уже открытой транзакции withAccount (для сценариев из нескольких шагов). */
+  async createIn(client: PoolClient, input: CreateBookingInput): Promise<Booking> {
     const actor = input.actor ?? 'client';
-    return this.db.withAccount(input.accountId, async (client) => {
-      const variant = await client.query<{ duration_min: number; buffer_min: number }>(
-        `SELECT COALESCE(ss.override_duration_min, v.duration_min) AS duration_min, v.buffer_min
-           FROM service_variants v
-           JOIN staff_services ss ON ss.service_id = v.service_id AND ss.staff_id = $1
-          WHERE v.id = $2 AND v.service_id = $3 AND v.active`,
-        [input.staffId, input.variantId, input.serviceId],
+    const variant = await client.query<{ duration_min: number; buffer_min: number }>(
+      `SELECT COALESCE(ss.override_duration_min, v.duration_min) AS duration_min, v.buffer_min
+         FROM service_variants v
+         JOIN staff_services ss ON ss.service_id = v.service_id AND ss.staff_id = $1
+        WHERE v.id = $2 AND v.service_id = $3 AND v.active`,
+      [input.staffId, input.variantId, input.serviceId],
+    );
+    const variantRow = variant.rows[0];
+    if (!variantRow) throw new NotFoundError('service variant for this staff member');
+
+    const blocked = await client.query(
+      `SELECT 1
+         FROM clients c
+         JOIN blacklist_entries b ON b.account_id = c.account_id AND b.phone_hash = c.phone_hash
+        WHERE c.id = $1 AND b.expires_at > now()`,
+      [input.clientId],
+    );
+    if ((blocked.rowCount ?? 0) > 0) throw new ClientBlockedError();
+
+    const policy = await client.query<{ id: string | null; version: number | null; hold_minutes: number | null }>(
+      `SELECT p.id, p.version, p.hold_minutes
+         FROM services s
+         LEFT JOIN policies p ON p.account_id = s.account_id AND p.id = s.cancel_policy_id
+        WHERE s.id = $1`,
+      [input.serviceId],
+    );
+    const policyRow = policy.rows[0];
+    if (!policyRow) throw new NotFoundError('service');
+
+    const holdMinutes = input.holdMinutes ?? policyRow.hold_minutes ?? DEFAULT_HOLD_MINUTES;
+    const startsAt = input.startsAt;
+    const endsAt = new Date(startsAt.getTime() + variantRow.duration_min * 60_000);
+    const slotEnd = new Date(endsAt.getTime() + variantRow.buffer_min * 60_000);
+
+    const released = await client.query<{ id: string }>(
+      `UPDATE bookings
+          SET status = 'expired', hold_expires_at = NULL, version = version + 1
+        WHERE staff_id = $1 AND status = 'pending' AND hold_expires_at <= now()
+          AND slot && tstzrange($2::timestamptz, $3::timestamptz, '[)')
+        RETURNING id`,
+      [input.staffId, startsAt, slotEnd],
+    );
+    for (const row of released.rows) {
+      await addEvent(client, input.accountId, row.id, 'status_changed', 'system', { from: 'pending', to: 'expired' });
+    }
+
+    const status: BookingStatus = input.requiresApproval ? 'pending' : 'confirmed';
+    let inserted;
+    try {
+      inserted = await client.query<BookingRow>(
+        `INSERT INTO bookings
+           (account_id, staff_id, client_id, service_id, variant_id, starts_at, ends_at, buffer_min,
+            capacity, status, hold_expires_at, policy_id, policy_version, custom_fields)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::text,
+                 CASE WHEN $10::text = 'pending' THEN now() + make_interval(mins => $11::int) END,
+                 $12, $13, $14)
+         RETURNING *`,
+        [
+          input.accountId,
+          input.staffId,
+          input.clientId,
+          input.serviceId,
+          input.variantId,
+          startsAt,
+          endsAt,
+          variantRow.buffer_min,
+          input.capacity ?? 1,
+          status,
+          holdMinutes,
+          policyRow.id,
+          policyRow.version,
+          JSON.stringify(input.customFields ?? {}),
+        ],
       );
-      const variantRow = variant.rows[0];
-      if (!variantRow) throw new NotFoundError('service variant for this staff member');
+    } catch (error) {
+      if ((error as { code?: string }).code === EXCLUSION_VIOLATION) throw new SlotTakenError();
+      throw error;
+    }
 
-      const blocked = await client.query(
-        `SELECT 1
-           FROM clients c
-           JOIN blacklist_entries b ON b.account_id = c.account_id AND b.phone_hash = c.phone_hash
-          WHERE c.id = $1 AND b.expires_at > now()`,
-        [input.clientId],
+    const row = inserted.rows[0];
+    if (!row) throw new Error('booking insert returned no row');
+    await addEvent(client, input.accountId, row.id, 'created', actor, { status });
+    return toBooking(row);
+  }
+
+  /** Записи Account, начинающиеся в [from, to), для календаря мастера. */
+  async list(accountId: string, from: Date, to: Date, staffId?: string): Promise<Booking[]> {
+    return this.db.withAccount(accountId, async (client) => {
+      const rows = await client.query<BookingRow>(
+        `SELECT * FROM bookings
+          WHERE starts_at >= $1 AND starts_at < $2 AND ($3::uuid IS NULL OR staff_id = $3)
+          ORDER BY starts_at`,
+        [from, to, staffId ?? null],
       );
-      if ((blocked.rowCount ?? 0) > 0) throw new ClientBlockedError();
-
-      const policy = await client.query<{ id: string | null; version: number | null; hold_minutes: number | null }>(
-        `SELECT p.id, p.version, p.hold_minutes
-           FROM services s
-           LEFT JOIN policies p ON p.account_id = s.account_id AND p.id = s.cancel_policy_id
-          WHERE s.id = $1`,
-        [input.serviceId],
-      );
-      const policyRow = policy.rows[0];
-      if (!policyRow) throw new NotFoundError('service');
-
-      const holdMinutes = input.holdMinutes ?? policyRow.hold_minutes ?? DEFAULT_HOLD_MINUTES;
-      const startsAt = input.startsAt;
-      const endsAt = new Date(startsAt.getTime() + variantRow.duration_min * 60_000);
-      const slotEnd = new Date(endsAt.getTime() + variantRow.buffer_min * 60_000);
-
-      const released = await client.query<{ id: string }>(
-        `UPDATE bookings
-            SET status = 'expired', hold_expires_at = NULL, version = version + 1
-          WHERE staff_id = $1 AND status = 'pending' AND hold_expires_at <= now()
-            AND slot && tstzrange($2::timestamptz, $3::timestamptz, '[)')
-          RETURNING id`,
-        [input.staffId, startsAt, slotEnd],
-      );
-      for (const row of released.rows) {
-        await addEvent(client, input.accountId, row.id, 'status_changed', 'system', { from: 'pending', to: 'expired' });
-      }
-
-      const status: BookingStatus = input.requiresApproval ? 'pending' : 'confirmed';
-      let inserted;
-      try {
-        inserted = await client.query<BookingRow>(
-          `INSERT INTO bookings
-             (account_id, staff_id, client_id, service_id, variant_id, starts_at, ends_at, buffer_min,
-              capacity, status, hold_expires_at, policy_id, policy_version, custom_fields)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::text,
-                   CASE WHEN $10::text = 'pending' THEN now() + make_interval(mins => $11::int) END,
-                   $12, $13, $14)
-           RETURNING *`,
-          [
-            input.accountId,
-            input.staffId,
-            input.clientId,
-            input.serviceId,
-            input.variantId,
-            startsAt,
-            endsAt,
-            variantRow.buffer_min,
-            input.capacity ?? 1,
-            status,
-            holdMinutes,
-            policyRow.id,
-            policyRow.version,
-            JSON.stringify(input.customFields ?? {}),
-          ],
-        );
-      } catch (error) {
-        if ((error as { code?: string }).code === EXCLUSION_VIOLATION) throw new SlotTakenError();
-        throw error;
-      }
-
-      const row = inserted.rows[0];
-      if (!row) throw new Error('booking insert returned no row');
-      await addEvent(client, input.accountId, row.id, 'created', actor, { status });
-      return toBooking(row);
+      return rows.rows.map(toBooking);
     });
   }
 

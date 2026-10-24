@@ -1,22 +1,14 @@
 import type { BookingStatus } from '@rezerwapp/shared';
+import { AppError, NotFoundError } from '../errors';
 
-export class BookingError extends Error {
-  constructor(readonly code: string, message: string) {
-    super(message);
-    this.name = new.target.name;
-  }
-}
+export { NotFoundError };
+
+export class BookingError extends AppError {}
 
 /** Слот занят другой записью (ограничение bookings_no_overlap). Клиенту: booking.error.slot_taken. */
 export class SlotTakenError extends BookingError {
   constructor() {
     super('SLOT_TAKEN', 'The requested time slot is already taken');
-  }
-}
-
-export class NotFoundError extends BookingError {
-  constructor(what: string) {
-    super('NOT_FOUND', `${what} not found`);
   }
 }
 

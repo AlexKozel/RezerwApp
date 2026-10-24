@@ -8,18 +8,22 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "start": "node dist/main.js",
     "migrate": "node dist/db/migrate-cli.js",
-    "test": "tsc -p tsconfig.test.json && node --test --test-concurrency=1 \".test-dist/test/*.test.js\""
+    "test": "tsc -p tsconfig.test.json && node --test --test-concurrency=1 \".test-dist/test/*.test.js\"",
+    "create-master": "node dist/cli/create-master.js"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",
     "@nestjs/platform-express": "^11.0.0",
     "@rezerwapp/shared": "workspace:*",
+    "ioredis": "^5.11.1",
     "pg": "^8.13.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
   },
   "devDependencies": {
+    "@nestjs/testing": "^11.2.8",
+    "@types/express": "^5.0.6",
     "@types/node": "^22.10.0",
     "@types/pg": "^8.11.10"
   }
