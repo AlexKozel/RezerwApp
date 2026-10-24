@@ -1,0 +1,15 @@
+{
+  "name": "@rezerwapp/shared",
+  "version": "0.0.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "tsc -p tsconfig.test.json && node --test \".test-dist/test/*.test.js\""
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0"
+  }
+}

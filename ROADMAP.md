@@ -5,6 +5,19 @@
 
 ## Sprint 0. Основы
 
+**Статус (2026-10-24):**
+- [x] Monorepo (pnpm), TypeScript, CI (`.github/workflows/ci.yml`), `docker-compose.yml`.
+- [x] Миграция `0001_init.sql`: схема, EXCLUDE от двойной записи, RLS FORCE, роли и права. Проверено на PostgreSQL 16: `scripts/verify-db.sh`, 43 проверки, включая гонку 20 параллельных заявок.
+- [x] `packages/shared`: машина статусов, границы резервационной оплаты, i18n PL/UK/RU/EN, нормализация телефона. 23 теста.
+- [x] `apps/api`: доступ к БД с контекстом Account, раннер миграций, `BookingsService` (создание, переходы, освобождение hold), Nest-каркас с `/health`.
+- [x] Полный прогон локально (2026-10-24, Windows 11, Node 25.2.1, pnpm 10.28.0, PostgreSQL 16.15 в Docker): `pnpm build`, `pnpm typecheck`, `pnpm db:migrate` (повторный запуск идемпотентен), `verify-db.sh` 43/0, `pnpm test`: shared 23/23, api 22/22 (BookingsService, migrate, пул соединений).
+- [x] API запущен, `GET /health`: 200 `{"status":"ok"}`; при остановленной БД 503 `database_unavailable`, после её возврата снова 200 без перезапуска процесса.
+- [x] Исправлено по итогам прогона: обрыв соединения с БД ронял процесс API (нет обработчика `error` у `pg.Pool`); `verify-db.sh` не запускался на Windows из-за CRLF (добавлен `.gitattributes`); README не загружал `.env` перед `pnpm db:migrate`.
+- [x] `pnpm-lock.yaml` закоммичен, CI на `--frozen-lockfile`.
+- [ ] Прогон в GitHub Actions (Node 22, Linux) после пуша ветки: проверить статус workflow.
+- [ ] Спайк iOS (gate G1), хостинг в ЕС, юридика (L-01).
+- [ ] Не сделано в Sprint 0: шифрование полей (envelope), HMAC-хеш телефона в `apps/api`, функция входа до выбора Account (RLS на `users`), seed юридических текстов.
+
 - Репозиторий (monorepo: `apps/widget`, `apps/pwa`, `apps/api`, `packages/shared`), CI, окружения dev/staging.
 - Хостинг в ЕС, домены, секреты.
 - Модель данных и миграции: Account, Location, Staff, Service, Variant, Booking с ограничением от пересечений, RLS.
