@@ -1,0 +1,14 @@
+{
+  "name": "RezerwApp",
+  "short_name": "RezerwApp",
+  "description": "Kalendarz i zgłoszenia dla specjalistów",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#faf8f6",
+  "theme_color": "#b2486b",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
