@@ -1,3 +1,4 @@
+import { describeError } from '../cli/describe-error';
 import { createPool } from './db';
 import { migrate } from './migrate';
 
@@ -14,6 +15,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.message : error);
+  console.error(describeError(error));
   process.exit(1);
 });

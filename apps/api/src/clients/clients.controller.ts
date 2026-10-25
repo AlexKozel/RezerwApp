@@ -4,6 +4,7 @@ import type { Response } from 'express';
 import { StaffAccess } from '../auth/access';
 import { CurrentSession, Roles, SessionGuard } from '../auth/auth.guard';
 import type { Session } from '../auth/session-store';
+import { ValidationError } from '../errors';
 import { Input } from '../http/validate';
 import { BLACKLIST_DEFAULT_DAYS, CrmService, toCsv, type Viewer } from './crm.service';
 
@@ -64,6 +65,21 @@ export class ClientsController {
     res.setHeader('Content-Disposition', `attachment; filename="clients-${stamp}.csv"`);
     // BOM: Excel иначе открывает UTF-8 (польские и кириллические имена) в неверной кодировке.
     return '﻿' + toCsv(data.clients, ['id', 'name', 'phone', 'email', 'language', 'createdAt', 'anonymizedAt']);
+  }
+
+  /**
+   * Импорт базы клиентов (D-054). Тело: CSV как text/csv (до 2 МБ, 5000 строк), колонки name/imię/имя и
+   * phone/telefon/телефон обязательны, email и language необязательны. ?dryRun=true: только отчёт, без записи.
+   */
+  @Post('clients/import')
+  @Roles(['owner'])
+  @HttpCode(200)
+  async import(@CurrentSession() s: Session, @Body() body: unknown, @Query() query: unknown) {
+    const input = new Input(query);
+    const dryRun = input.optOneOf('dryRun', ['true', 'false'] as const) === 'true';
+    input.done();
+    if (typeof body !== 'string') throw new ValidationError({ csv: 'send the file as text/csv' });
+    return this.crm.importCsv(await this.viewer(s), body, dryRun);
   }
 
   @Get('clients/:id')

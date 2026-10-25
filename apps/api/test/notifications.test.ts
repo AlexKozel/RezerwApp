@@ -19,6 +19,7 @@ import { QueueNotifier } from '../src/notifications/queue';
 import { ManageTokens } from '../src/public/manage-token';
 import { Client, RecordingNotifier, TEST_CONFIG, TEST_OTP, TEST_REDIS_URL, createTestApp, type TestApp } from './helpers/app';
 import { createTestDb, type TestDb } from './helpers/test-db';
+import { slotWithinDay } from './helpers/time';
 
 const PASSWORD = 'very secret 123';
 const WAW = 'Europe/Warsaw';
@@ -215,7 +216,8 @@ describe('уведомления (D-035, D-052)', () => {
   });
 
   test('напоминание клиенту за 24 часа: один раз, не для записей, сделанных менее чем за сутки', async () => {
-    const soon = new Date(Math.ceil((Date.now() + 20 * 3_600_000) / 900_000) * 900_000);
+    // В пределах 24 часов, и обе записи (soon и soon + 2 ч) помещаются в местный день.
+    const soon = slotWithinDay(20 * 3_600_000, WAW, 180);
     const early = await book(service, soon);
     const late = await book(service, new Date(soon.getTime() + 2 * 3_600_000));
     await db.admin.query("UPDATE bookings SET created_at = now() - interval '3 days' WHERE id = $1", [early.bookingId]);

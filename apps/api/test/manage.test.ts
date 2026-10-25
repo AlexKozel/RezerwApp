@@ -5,6 +5,7 @@ import { paymentOutcome } from '../src/bookings/payments';
 import { ManageTokens } from '../src/public/manage-token';
 import { Client, TEST_CONFIG, TEST_OTP, createTestApp, type TestApp } from './helpers/app';
 import { createTestDb, type TestDb } from './helpers/test-db';
+import { slotWithinDay } from './helpers/time';
 
 const PASSWORD = 'very secret 123';
 const HOUR = 3_600_000;
@@ -172,14 +173,16 @@ describe('HTTP: перенос и отмена клиентом по ссылк�
   });
 
   test('после дедлайна: переноса нет, «связаться с мастером», отмена оставляет оплату мастеру', async () => {
-    const b = await book(paid, slotAt(5 * HOUR));
+    // Позже дедлайна (24 ч), но не раньше minLead (2 ч), и визит не переходит через полночь.
+    const start = slotWithinDay(3 * HOUR);
+    const b = await book(paid, start);
     await master.post(`/bookings/${b.bookingId}/transition`, { to: 'confirmed' });
     const view = (await anon.get(`/public/bookings/${b.manageToken}`)).body;
     assert.deepEqual([view.canCancel, view.lateCancel, view.canReschedule, view.contactMaster], [true, true, false, true]);
     assert.equal(view.bookingFee.status, 'confirmed');
     assert.equal(view.bookingFee.blikPhone, '+48600700800');
 
-    const late = await anon.post(`/public/bookings/${b.manageToken}/reschedule`, { startsAt: slotAt(6 * HOUR).toISOString() });
+    const late = await anon.post(`/public/bookings/${b.manageToken}/reschedule`, { startsAt: new Date(start.getTime() + HOUR).toISOString() });
     assert.deepEqual(late.body, { error: 'RESCHEDULE_TOO_LATE' });
     assert.deepEqual((await anon.post(`/public/bookings/${b.manageToken}/cancel`)).body, { status: 'cancelled_by_client', late: true, payment: 'kept' });
   });

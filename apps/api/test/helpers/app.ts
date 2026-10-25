@@ -1,11 +1,13 @@
 import { randomBytes } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { Redis } from 'ioredis';
 import { AppModule } from '../../src/app.module';
 import { APP_CONFIG, NOTIFIER, REDIS } from '../../src/app.tokens';
 import type { AppConfig } from '../../src/config';
 import { DbService } from '../../src/db/db.service';
+import { configureApp } from '../../src/http/configure';
 import type { BookingNotification, Notifier } from '../../src/jobs/notifier';
 import type { TestDb } from './test-db';
 
@@ -61,8 +63,8 @@ export async function createTestApp(db: TestDb): Promise<TestApp> {
     .overrideProvider(REDIS)
     .useValue(redis)
     .compile();
-  const app = moduleRef.createNestApplication({ logger: false });
-  app.enableShutdownHooks();
+  const app = moduleRef.createNestApplication<NestExpressApplication>({ logger: false });
+  configureApp(app);
   await app.listen(0, '127.0.0.1');
   const url = await app.getUrl();
   return {
@@ -107,6 +109,16 @@ export class Client {
       const pair = setCookie.split(';')[0]!;
       this.cookie = /Max-Age=0/.test(setCookie) ? undefined : pair;
     }
+    const text = await res.text();
+    const json = (res.headers.get('content-type') ?? '').includes('application/json');
+    return { status: res.status, body: text ? (json ? JSON.parse(text) : text) : undefined, headers: res.headers };
+  }
+
+  /** Тело как есть с указанным Content-Type (например, text/csv). */
+  async raw<T = any>(method: string, path: string, body: string, contentType: string): Promise<HttpResponse<T>> {
+    const headers: Record<string, string> = { 'content-type': contentType };
+    if (this.cookie) headers.cookie = this.cookie;
+    const res = await fetch(this.base + path, { method, headers, body });
     const text = await res.text();
     const json = (res.headers.get('content-type') ?? '').includes('application/json');
     return { status: res.status, body: text ? (json ? JSON.parse(text) : text) : undefined, headers: res.headers };

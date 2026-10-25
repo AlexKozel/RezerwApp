@@ -1,6 +1,8 @@
 services:
   postgres:
     image: postgres:16
+    # Поднимается сам после перезапуска Docker (иначе тесты и API падают с ECONNREFUSED).
+    restart: unless-stopped
     environment:
       POSTGRES_USER: rezerwapp
       POSTGRES_PASSWORD: rezerwapp
@@ -17,6 +19,7 @@ services:
 
   redis:
     image: redis:7
+    restart: unless-stopped
     ports:
       # 6380 на хосте: 6379 часто занят локальным Redis/Memurai.
       - "6380:6379"

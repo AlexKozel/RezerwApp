@@ -27,6 +27,8 @@ import { DbService } from './db/db.service';
 import { HealthController } from './health.controller';
 import { AppErrorFilter } from './http/error.filter';
 import { MaintenanceJobs } from './jobs/maintenance';
+import { LocationsController } from './locations/locations.controller';
+import { InviteTokens, LocationsService } from './locations/locations.service';
 import type { Notifier } from './jobs/notifier';
 import { JobScheduler } from './jobs/scheduler';
 import { SandboxChannel } from './notifications/channels';
@@ -57,6 +59,7 @@ class RedisShutdown implements OnApplicationShutdown {
     AccountController,
     CatalogController,
     ClientsController,
+    LocationsController,
     AvailabilityController,
     BookingsController,
     PublicController,
@@ -155,6 +158,11 @@ class RedisShutdown implements OnApplicationShutdown {
       ],
     },
     { provide: ManageTokens, useFactory: (config: AppConfig) => new ManageTokens(config.fieldMasterKey), inject: [APP_CONFIG] },
+    {
+      provide: LocationsService,
+      useFactory: (db: DbService, config: AppConfig) => new LocationsService(db, new InviteTokens(config.fieldMasterKey)),
+      inject: [DbService, APP_CONFIG],
+    },
     {
       provide: ManageBookingService,
       useFactory: (
