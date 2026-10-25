@@ -11,6 +11,8 @@
   --warn: #9a5b00;
   --error: #b42318;
   --radius: 12px;
+  /* Нерабочее время в календаре: заметно отличается от свободного (--card) в обеих темах. */
+  --off: #e9e4df;
   color-scheme: light;
 }
 
@@ -26,6 +28,7 @@
     --ok: #6fcf97;
     --warn: #f2b45c;
     --error: #ff8a80;
+    --off: #0d0c0b;
     color-scheme: dark;
   }
 }
@@ -251,3 +254,129 @@ textarea { min-height: 96px; resize: vertical; }
 .stat strong { font-size: 1.4rem; }
 
 .link-row { display: flex; gap: 8px; align-items: center; word-break: break-all; }
+
+/* Выбор языка в шапке и на экране входа: компактный, видно код языка. */
+select.lang-select { width: auto; min-height: 36px; padding: 4px 8px; font-size: 0.85rem; flex: none; }
+.bar-end { display: flex; gap: 8px; align-items: center; flex: none; }
+.login-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+
+/* --- Календарь: неделя и месяц (D-063) --- */
+.views { display: flex; gap: 8px; margin-top: 12px; }
+.views .chip { flex: 1; text-align: center; }
+
+.week { margin-top: 12px; }
+.week-head, .week-body { display: grid; grid-template-columns: 38px repeat(7, 1fr); }
+.week-head button {
+  background: none;
+  border: 0;
+  padding: 4px 0;
+  font: inherit;
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-size: 0.75rem;
+  min-height: 44px;
+}
+.week-head button strong { font-size: 1rem; color: var(--text); }
+.week-head button.today strong {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-radius: 999px;
+  min-width: 26px;
+  line-height: 26px;
+}
+.week-body { position: relative; border-top: 1px solid var(--line); }
+.week-hours { position: relative; }
+.week-hours span { position: absolute; right: 4px; transform: translateY(-50%); font-size: 0.65rem; color: var(--muted); }
+.week-hours span:first-child { transform: none; }
+.week-day {
+  position: relative;
+  border-left: 1px solid var(--line);
+  background: var(--off);
+}
+/* Линии часов поверх свободного времени и блокировок, но под записями. */
+.week-day::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: linear-gradient(to bottom, color-mix(in srgb, var(--muted) 30%, transparent) 1px, transparent 1px);
+  background-size: inherit;
+  z-index: 1;
+}
+.week-day .visit { z-index: 2; }
+.week-day .lane { position: absolute; top: 0; bottom: 0; cursor: pointer; }
+.week-day .lane + .lane { border-left: 1px dashed var(--line); }
+.week-day .free {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: var(--card);
+}
+.week-day .blocked {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: repeating-linear-gradient(135deg, var(--line) 0 4px, transparent 4px 8px);
+}
+.week-day .visit {
+  --visit: var(--accent);
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  min-height: 14px;
+  margin: 0;
+  padding: 1px 2px;
+  border: 0;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--visit) 85%, transparent);
+  color: #fff;
+  font: inherit;
+  font-size: 0.6rem;
+  line-height: 1.15;
+  text-align: left;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.week-day .visit span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.week-day .visit.pending { background: var(--card); color: var(--visit); outline: 2px dashed var(--visit); outline-offset: -2px; }
+.week-day .visit.completed, .week-day .visit.no_show { opacity: 0.55; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; font-size: 0.75rem; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 4px; }
+.legend i { width: 12px; height: 12px; border-radius: 3px; border: 1px solid var(--line); display: inline-block; }
+.legend i.free { background: var(--card); }
+.legend i.off { background: var(--off); }
+.legend i.blocked { background: repeating-linear-gradient(135deg, var(--line) 0 3px, transparent 3px 6px); }
+.legend i.pending { border: 2px dashed var(--accent); }
+
+.month { margin-top: 12px; }
+.month-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.month-wd { text-align: center; font-size: 0.7rem; color: var(--muted); padding-bottom: 2px; }
+.month-day {
+  position: relative;
+  min-height: 56px;
+  padding: 4px;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+.month-day .num { font-size: 0.75rem; color: var(--muted); }
+.month-day strong { font-size: 1rem; }
+.month-day .dot { position: absolute; top: 6px; right: 6px; width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
+.month-day .load { position: absolute; left: 4px; right: 4px; bottom: 4px; height: 3px; border-radius: 2px; background: var(--line); }
+.month-day .load span { display: block; height: 100%; border-radius: 2px; background: var(--accent); }
+.month-day.off { background: var(--off); }
+.month-day.other { opacity: 0.45; }
+.month-day.today { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }

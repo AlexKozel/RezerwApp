@@ -2,8 +2,23 @@ import { formatDayLabel, formatMoney, formatTime, localDate, pickText, type Mess
 import { useCallback, useEffect, useState } from 'react';
 import { api, type CalendarBooking, type Me, type Staff } from '../api';
 import { useT } from '../i18n';
+import { addMonths, weekDays } from '../lib/calendar';
 import { addDays, dayRange, today } from '../lib/dates';
 import { go } from '../router';
+import { MonthView, WeekView, type ScopeStaff } from './CalendarViews';
+
+type View = 'day' | 'week' | 'month';
+const VIEW_KEY = 'rezerwapp.calview';
+
+function savedView(): View {
+  try {
+    const v = localStorage.getItem(VIEW_KEY);
+    if (v === 'day' || v === 'week' || v === 'month') return v;
+  } catch {
+    // хранилище недоступно: вид по умолчанию
+  }
+  return 'day';
+}
 
 /** Заявки ищутся на этот срок вперёд (горизонт записи по умолчанию 60 дней, D-043). */
 const REQUESTS_AHEAD_DAYS = 60;
@@ -13,6 +28,7 @@ type Action = 'confirmed' | 'rejected' | 'completed' | 'no_show' | 'cancelled_by
 /**
  * Календарь мастера: заявки на подтверждение (с проверкой оплаты BLIK по коду) и записи выбранного дня.
  * День и время в поясе Account. owner и assistant выбирают специалиста, staff видит только свои записи (D-047).
+ * Вид: день (записи с действиями), неделя (сетка со свободным временем) или месяц (загрузка по дням), D-063.
  */
 export function Calendar({ me }: { me: Me }) {
   const { t, locale } = useT();
@@ -23,6 +39,35 @@ export function Calendar({ me }: { me: Me }) {
   const [bookings, setBookings] = useState<CalendarBooking[] | null>(null);
   const [requests, setRequests] = useState<CalendarBooking[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [view, setViewState] = useState<View>(savedView);
+
+  const setView = (v: View) => {
+    setViewState(v);
+    try {
+      localStorage.setItem(VIEW_KEY, v);
+    } catch {
+      // не критично
+    }
+  };
+  const openDay = (d: string) => {
+    setDay(d);
+    setView('day');
+  };
+  const scope: ScopeStaff[] =
+    me.role === 'staff'
+      ? me.staffId
+        ? [{ id: me.staffId, name: '' }]
+        : []
+      : staff.filter((s) => !staffId || s.id === staffId).map((s) => ({ id: s.id, name: s.displayName }));
+  const step = (n: number) => setDay(view === 'day' ? addDays(day, n) : view === 'week' ? addDays(day, 7 * n) : addMonths(day, n));
+  const week = weekDays(day);
+  const label =
+    view === 'day'
+      ? formatDayLabel(day, locale)
+      : view === 'week'
+        ? `${formatDayLabel(week[0]!, locale)} – ${formatDayLabel(week[6]!, locale)}`
+        : new Intl.DateTimeFormat(locale, { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${day}T00:00:00Z`));
+  const showsToday = view === 'day' ? day === today(tz) : view === 'week' ? week.includes(today(tz)) : day.slice(0, 7) === today(tz).slice(0, 7);
 
   useEffect(() => {
     if (me.role !== 'staff') void api<Staff[]>('GET', '/staff').then((r) => setStaff((r.data ?? []).filter((s) => s.active)));
@@ -123,16 +168,24 @@ export function Calendar({ me }: { me: Me }) {
         </section>
       )}
 
-      <div className="daynav" style={{ marginTop: 16 }}>
-        <button type="button" className="secondary" aria-label="‹" onClick={() => setDay(addDays(day, -1))}>
+      <div className="views" role="group">
+        {(['day', 'week', 'month'] as const).map((v) => (
+          <button key={v} type="button" className="chip" aria-pressed={view === v} onClick={() => setView(v)}>
+            {t(`pwa.cal.view.${v}`)}
+          </button>
+        ))}
+      </div>
+
+      <div className="daynav" style={{ marginTop: 12 }}>
+        <button type="button" className="secondary" aria-label="‹" onClick={() => step(-1)}>
           ‹
         </button>
-        <strong>{formatDayLabel(day, locale)}</strong>
-        <button type="button" className="secondary" aria-label="›" onClick={() => setDay(addDays(day, 1))}>
+        <strong>{label}</strong>
+        <button type="button" className="secondary" aria-label="›" onClick={() => step(1)}>
           ›
         </button>
       </div>
-      {day !== today(tz) && (
+      {!showsToday && (
         <button type="button" className="chip" style={{ marginTop: 8 }} onClick={() => setDay(today(tz))}>
           {t('pwa.cal.today')}
         </button>
@@ -142,7 +195,11 @@ export function Calendar({ me }: { me: Me }) {
           {error}
         </p>
       )}
-      {bookings === null ? (
+      {view === 'week' ? (
+        <WeekView scope={scope} staffFilter={staffId} day={day} timeZone={tz} onOpenDay={openDay} />
+      ) : view === 'month' ? (
+        <MonthView scope={scope} staffFilter={staffId} day={day} timeZone={tz} onOpenDay={openDay} />
+      ) : bookings === null ? (
         <p className="muted">…</p>
       ) : bookings.filter((b) => b.status !== 'rescheduled').length === 0 ? (
         <p className="muted">{t('pwa.cal.empty')}</p>

@@ -1,7 +1,7 @@
 import type { Locale } from '@rezerwapp/shared';
 import { useCallback, useEffect, useState } from 'react';
 import { api, onAuthProblem, type Me } from './api';
-import { LocaleProvider, initialLocale, saveLocale, useT } from './i18n';
+import { LanguageSelect, LocaleProvider, initialLocale, saveLocale, useT } from './i18n';
 import { go, useRoute } from './router';
 import { Calendar } from './screens/Calendar';
 import { Catalog, ServiceEditor } from './screens/Catalog';
@@ -52,7 +52,7 @@ export function App() {
       {me === undefined ? (
         <main>…</main>
       ) : me === null ? (
-        <Login onLoggedIn={refresh} />
+        <Login onLoggedIn={refresh} onLocale={changeLocale} />
       ) : me.mustChangePassword ? (
         <ChangePassword forced onChanged={refresh} onLogout={() => setMe(null)} />
       ) : me.pendingDocuments.length > 0 ? (
@@ -66,7 +66,7 @@ export function App() {
 
 function Shell({ me, onLogout, onLocale }: { me: Me; onLogout: () => void; onLocale: (l: Locale) => void }) {
   const { t } = useT();
-  const [screen, param] = useRoute();
+  const [screen, param, extra, extra2] = useRoute();
   const [online, setOnline] = useState(navigator.onLine);
   useEffect(() => {
     const update = () => setOnline(navigator.onLine);
@@ -88,7 +88,7 @@ function Shell({ me, onLogout, onLocale }: { me: Me; onLogout: () => void; onLoc
   let content;
   if (screen === 'clients' && param) content = <ClientCardScreen me={me} clientId={param} />;
   else if (screen === 'clients') content = <Clients />;
-  else if (screen === 'new') content = <NewBooking me={me} day={param} />;
+  else if (screen === 'new') content = <NewBooking me={me} day={param} time={extra} staffId={extra2} />;
   else if (screen === 'stats') content = <Stats me={me} />;
   else if (screen === 'services' && param) content = <ServiceEditor me={me} serviceId={param} />;
   else if (screen === 'services') content = <Catalog me={me} />;
@@ -101,11 +101,14 @@ function Shell({ me, onLogout, onLocale }: { me: Me; onLogout: () => void; onLoc
     <>
       <header className="bar">
         <span className="muted">{me.accountName}</span>
-        {screen !== 'calendar' && screen !== 'clients' && screen !== 'stats' && screen !== 'settings' && (
-          <button type="button" className="secondary" onClick={() => window.history.back()}>
-            {t('widget.back')}
-          </button>
-        )}
+        <div className="bar-end">
+          {screen !== 'calendar' && screen !== 'clients' && screen !== 'stats' && screen !== 'settings' && (
+            <button type="button" className="secondary" onClick={() => window.history.back()}>
+              {t('widget.back')}
+            </button>
+          )}
+          <LanguageSelect onChange={onLocale} />
+        </div>
       </header>
       {!online && <p className="notice warn" style={{ margin: '8px 16px' }}>{t('pwa.offline')}</p>}
       {content}

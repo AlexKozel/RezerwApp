@@ -10,12 +10,13 @@ const DAYS = 14;
 /**
  * Ручная запись (клиент позвонил или написал): клиент из базы или новый, услуга, день и время.
  * Время из свободных слотов или любое вручную: рабочие часы мастер может нарушить сам, пересечение запретит API.
+ * Из недельной сетки приходят день, время и специалист (#/new/<день>/<ЧЧ:ММ>/<staffId>).
  */
-export function NewBooking({ me, day: initialDay }: { me: Me; day?: string }) {
+export function NewBooking({ me, day: initialDay, time, staffId: initialStaff }: { me: Me; day?: string; time?: string; staffId?: string }) {
   const { t, locale } = useT();
   const tz = me.timeZone;
   const [staff, setStaff] = useState<Staff[]>([]);
-  const [staffId, setStaffId] = useState(me.staffId ?? '');
+  const [staffId, setStaffId] = useState(me.staffId ?? initialStaff ?? '');
   const [services, setServices] = useState<ServiceItem[]>([]);
   const [variantId, setVariantId] = useState('');
   const [serviceId, setServiceId] = useState('');
@@ -28,7 +29,7 @@ export function NewBooking({ me, day: initialDay }: { me: Me; day?: string }) {
   const [day, setDay] = useState(initialDay && /^\d{4}-\d{2}-\d{2}$/.test(initialDay) ? initialDay : today(tz));
   const [slots, setSlots] = useState<string[] | null>(null);
   const [startsAt, setStartsAt] = useState<string | null>(null);
-  const [manualTime, setManualTime] = useState('');
+  const [manualTime, setManualTime] = useState(time && /^\d{2}:\d{2}$/.test(time) ? time : '');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -60,8 +61,16 @@ export function NewBooking({ me, day: initialDay }: { me: Me; day?: string }) {
     if (!staffId || !variantId) return;
     setSlots(null);
     void api<{ slots: string[] }>('GET', `/staff/${staffId}/slots?variantId=${variantId}&from=${day}&to=${day}`).then((r) => {
-      setSlots(r.data?.slots ?? []);
+      const list = r.data?.slots ?? [];
+      setSlots(list);
       if (!r.ok) setError(t(r.error === 'NOT_FOUND' ? 'widget.no_slots' : 'pwa.error'));
+      // Время из недельной сетки: если это свободный слот, выбираем его вместо ручного ввода.
+      // manualTime читается из замыкания намеренно: важно только время, пришедшее в маршруте.
+      const preset = manualTime ? atLocalTime(day, manualTime, tz) : null;
+      if (preset && list.includes(preset)) {
+        setStartsAt(preset);
+        setManualTime('');
+      }
     });
   }, [staffId, variantId, day]);
 

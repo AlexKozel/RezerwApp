@@ -1,8 +1,9 @@
+import type { Locale } from '@rezerwapp/shared';
 import { useState } from 'react';
 import { api } from '../api';
-import { useT } from '../i18n';
+import { LanguageSelect, useT } from '../i18n';
 
-export function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
+export function Login({ onLoggedIn, onLocale }: { onLoggedIn: () => void; onLocale: (l: Locale) => void }) {
   const { t } = useT();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -21,7 +22,10 @@ export function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
 
   return (
     <main>
-      <h1>RezerwApp</h1>
+      <div className="login-top">
+        <h1>RezerwApp</h1>
+        <LanguageSelect onChange={onLocale} />
+      </div>
       <form onSubmit={(e) => void submit(e)}>
         <h2>{t('pwa.login.title')}</h2>
         <label htmlFor="email">{t('pwa.login.email')}</label>

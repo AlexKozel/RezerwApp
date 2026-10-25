@@ -1,4 +1,4 @@
-import { DEFAULT_LOCALE, isLocale, t as translate, type Locale, type MessageKey, type MessageParams } from '@rezerwapp/shared';
+import { DEFAULT_LOCALE, LOCALES, isLocale, t as translate, type Locale, type MessageKey, type MessageParams } from '@rezerwapp/shared';
 import { createContext, useContext, useMemo, type ReactNode } from 'react';
 
 const STORAGE_KEY = 'rezerwapp.lang';
@@ -43,4 +43,20 @@ export function LocaleProvider({ locale, children }: { locale: Locale; children:
 /** Текущий язык и t() интерфейса; t стабильна, пока не сменится язык. */
 export function useT(): LocaleValue {
   return useContext(LocaleContext);
+}
+
+export const LANGUAGE_NAMES: Record<Locale, string> = { pl: 'Polski', uk: 'Українська', ru: 'Русский', en: 'English' };
+
+/** Компактный выбор языка для шапки и экрана входа: язык должен находиться сразу, а не в конце настроек. */
+export function LanguageSelect({ onChange }: { onChange: (l: Locale) => void }) {
+  const { t, locale } = useT();
+  return (
+    <select className="lang-select" aria-label={t('widget.language')} value={locale} onChange={(e) => isLocale(e.target.value) && onChange(e.target.value)}>
+      {LOCALES.map((l) => (
+        <option key={l} value={l}>
+          {l.toUpperCase()} · {LANGUAGE_NAMES[l]}
+        </option>
+      ))}
+    </select>
+  );
 }

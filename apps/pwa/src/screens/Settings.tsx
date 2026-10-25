@@ -1,10 +1,9 @@
 import { LOCALES, type Locale } from '@rezerwapp/shared';
 import { useEffect, useState } from 'react';
 import { api, type Me, type Staff } from '../api';
-import { useT } from '../i18n';
+import { LANGUAGE_NAMES, useT } from '../i18n';
 import { invalidRows, toIntervals, toRows, type ApiInterval, type DayRow } from '../lib/hours';
 
-const LANGUAGE_NAMES: Record<Locale, string> = { pl: 'Polski', uk: 'Українська', ru: 'Русский', en: 'English' };
 /** Адрес виджета клиента для ссылки «link in bio». */
 const PUBLIC_URL = (import.meta.env.VITE_PUBLIC_URL as string | undefined) ?? 'http://localhost:3002';
 
