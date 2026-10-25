@@ -97,6 +97,16 @@ export function Settings({ me, onLogout, onLocale }: { me: Me; onLogout: () => v
         <span>{t('pwa.cat.title')}</span>
         <span aria-hidden="true">›</span>
       </a>
+      {me.role === 'owner' && (
+        <a className="option" href="#/team">
+          <span>{t('pwa.team.title')}</span>
+          <span aria-hidden="true">›</span>
+        </a>
+      )}
+      <a className="option" href="#/password">
+        <span>{t('pwa.pwd.title')}</span>
+        <span aria-hidden="true">›</span>
+      </a>
 
       {rows && (
         <section>

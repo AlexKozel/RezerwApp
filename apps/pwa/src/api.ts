@@ -31,7 +31,7 @@ export async function api<T = unknown>(method: 'GET' | 'POST' | 'PUT' | 'PATCH' 
   }
   const json = res.headers.get('content-type')?.includes('application/json') ? await res.json() : undefined;
   const error = res.ok ? undefined : (json?.error as string | undefined);
-  if (res.status === 401 || error === 'ACCEPTANCE_REQUIRED') listener(res.status, error);
+  if (res.status === 401 || error === 'ACCEPTANCE_REQUIRED' || error === 'PASSWORD_CHANGE_REQUIRED') listener(res.status, error);
   return { ok: res.ok, status: res.status, data: res.ok ? (json as T) : undefined, error };
 }
 
@@ -46,6 +46,8 @@ export interface Me {
   locale: string;
   email: string;
   staffId: string | null;
+  /** Вход по временному паролю от owner'а: сначала смена пароля (D-061). */
+  mustChangePassword: boolean;
   pendingDocuments: Array<{ type: string; version: string }>;
 }
 
