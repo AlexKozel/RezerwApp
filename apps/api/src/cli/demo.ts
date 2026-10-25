@@ -78,7 +78,8 @@ async function seed(db: Db, migrator: Pool): Promise<void> {
   // Демо: сотрудник сразу со своим паролем, без обязательной смены (D-061 проверяется тестами).
   await users.changePassword(accountId, staffUser.id, 'temporary-pass-1', DEMO.staff.password);
 
-  const policy = await catalog.createPolicy(accountId, { freeCancelHours: 24, maxReschedules: 1, holdMinutes: 120, depositOnLateCancel: 'keep', texts: {} });
+  // Hold на максимум (сутки, CHECK в БД): иначе демо-заявка истекает через 2 часа после запуска и пропадает из заявок.
+  const policy = await catalog.createPolicy(accountId, { freeCancelHours: 24, maxReschedules: 1, holdMinutes: 1440, depositOnLateCancel: 'keep', texts: {} });
   const base = { category: null, prepaymentMethod: 'none' as const, depositMode: 'none' as const, depositValue: 0, depositScope: 'new_clients' as const, cancelPolicyId: policy.id, costPrice: null };
   const manicure = await catalog.createService(
     accountId,
