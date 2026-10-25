@@ -52,3 +52,13 @@ export function formatCountdown(ms: number): string {
   const mm = h > 0 ? String(m).padStart(2, '0') : String(m);
   return `${h > 0 ? `${h}:` : ''}${mm}:${String(s).padStart(2, '0')}`;
 }
+
+/** День рождения "MM-DD" для показа: «12 marca», «12 березня». 2000 год високосный: 29 февраля тоже. */
+export function formatBirthday(value: string, locale: Locale): string {
+  return new Intl.DateTimeFormat(INTL_LOCALE[locale], { timeZone: 'UTC', day: 'numeric', month: 'long' }).format(new Date(`2000-${value}T12:00:00Z`));
+}
+
+/** Название месяца для выбора даты рождения (1-12). */
+export function monthName(month: number, locale: Locale): string {
+  return new Intl.DateTimeFormat(INTL_LOCALE[locale], { timeZone: 'UTC', month: 'long' }).format(new Date(Date.UTC(2000, month - 1, 15)));
+}
