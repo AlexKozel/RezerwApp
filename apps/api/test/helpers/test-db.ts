@@ -29,15 +29,25 @@ export interface TestDb {
 /** Создаёт чистую базу под тестовый файл, применяет миграции, выдаёт логин роли приложения. */
 export async function createTestDb(name: string): Promise<TestDb> {
   const database = `rezerwapp_t_${name}`;
-  const server = new Pool({ connectionString: ADMIN_URL, max: 1 });
-  await server.query(`DROP DATABASE IF EXISTS ${database} WITH (FORCE)`);
-  await server.query(`CREATE DATABASE ${database}`);
-  await server.end();
-
   const adminUrl = withDatabase(ADMIN_URL, database);
   const admin = new Pool({ connectionString: adminUrl, max: 4 });
-  await migrate(admin);
-  await admin.query("ALTER ROLE rezerwapp_app LOGIN PASSWORD 'rezerwapp_app'");
+
+  // Миграции меняют общие для кластера роли (GRANT, ALTER ROLE). Тестовые файлы, запущенные параллельно,
+  // делали это одновременно и падали с «tuple concurrently updated». Advisory-блокировка мигратора действует
+  // в пределах одной базы, поэтому подготовка сериализуется блокировкой на общей админ-базе.
+  const server = new Pool({ connectionString: ADMIN_URL, max: 1 });
+  const lock = await server.connect();
+  try {
+    await lock.query('SELECT pg_advisory_lock(727099)');
+    await lock.query(`DROP DATABASE IF EXISTS ${database} WITH (FORCE)`);
+    await lock.query(`CREATE DATABASE ${database}`);
+    await migrate(admin);
+    await admin.query("ALTER ROLE rezerwapp_app LOGIN PASSWORD 'rezerwapp_app'");
+  } finally {
+    await lock.query('SELECT pg_advisory_unlock(727099)').catch(() => undefined);
+    lock.release();
+    await server.end();
+  }
 
   const app = new Db(createPool(withCredentials(adminUrl, 'rezerwapp_app', 'rezerwapp_app'), 20));
 
