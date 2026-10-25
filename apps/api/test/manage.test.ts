@@ -39,6 +39,13 @@ describe('токен ссылки управления', () => {
     assert.equal(new ManageTokens(Buffer.alloc(32, 2)).verify(token), null);
     for (const junk of ['', 'v1', 'v1..', 'v2.x.y', 'v1.%%%.%%%']) assert.equal(tokens.verify(junk), null, junk);
   });
+
+  test('принимается только каноническая запись токена (лишние биты последнего символа)', () => {
+    const token = tokens.issue(a, b);
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+    const accepted = [...alphabet].map((ch) => token.slice(0, -1) + ch).filter((variant) => tokens.verify(variant) !== null);
+    assert.deepEqual(accepted, [token]);
+  });
 });
 
 describe('HTTP: перенос и отмена клиентом по ссылке (BOOKING_FLOW.md, раздел 5)', () => {

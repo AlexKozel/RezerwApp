@@ -12,6 +12,8 @@ export interface AppConfig {
   cookieSecure: boolean;
   /** Запускать фоновые задачи BullMQ в этом процессе (D-049). */
   workers: boolean;
+  /** Адрес публичных страниц для ссылок в уведомлениях (страница специалиста, управление записью). */
+  publicUrl: string;
 }
 
 const DEV_PLACEHOLDERS = new Set(['change-me', '']);
@@ -22,6 +24,18 @@ function required(env: NodeJS.ProcessEnv, name: string): string {
   const value = env[name];
   if (value === undefined || value === '') throw new Error(`${name} is not set`);
   return value;
+}
+
+function publicUrl(env: NodeJS.ProcessEnv, production: boolean): string {
+  const raw = env.PUBLIC_URL ?? (production ? '' : `http://localhost:${env.PORT ?? 3000}`);
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error('PUBLIC_URL must be an absolute URL');
+  }
+  if (production && url.protocol !== 'https:') throw new Error('PUBLIC_URL must use https in production');
+  return url.toString().replace(/\/$/, '');
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -49,5 +63,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     alphaOtpCode,
     cookieSecure: env.COOKIE_SECURE !== undefined ? env.COOKIE_SECURE === 'true' : production,
     workers: env.WORKERS !== 'false',
+    publicUrl: publicUrl(env, production),
   };
 }

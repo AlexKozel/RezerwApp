@@ -27,8 +27,11 @@ import { DbService } from './db/db.service';
 import { HealthController } from './health.controller';
 import { AppErrorFilter } from './http/error.filter';
 import { MaintenanceJobs } from './jobs/maintenance';
-import { LogNotifier, type Notifier } from './jobs/notifier';
+import type { Notifier } from './jobs/notifier';
 import { JobScheduler } from './jobs/scheduler';
+import { SandboxChannel } from './notifications/channels';
+import { NotificationDispatcher } from './notifications/dispatcher';
+import { QueueNotifier } from './notifications/queue';
 import { ManageBookingService } from './public/manage-booking.service';
 import { ManageTokens } from './public/manage-token';
 import { AlphaOtpVerifier, type OtpVerifier } from './public/otp';
@@ -78,10 +81,22 @@ class RedisShutdown implements OnApplicationShutdown {
     },
     { provide: OTP_VERIFIER, useFactory: (config: AppConfig) => new AlphaOtpVerifier(config.alphaOtpCode), inject: [APP_CONFIG] },
     SessionGuard,
-    { provide: BookingsService, useFactory: (db: DbService) => new BookingsService(db), inject: [DbService] },
+    {
+      provide: BookingsService,
+      useFactory: (db: DbService, notifier: Notifier) => new BookingsService(db, notifier),
+      inject: [DbService, NOTIFIER],
+    },
     { provide: CatalogService, useFactory: (db: DbService) => new CatalogService(db), inject: [DbService] },
     { provide: StaffAccess, useFactory: (db: DbService) => new StaffAccess(db), inject: [DbService] },
-    { provide: NOTIFIER, useFactory: () => new LogNotifier() },
+    // Уведомления ставятся в очередь BullMQ (D-052); доставляет воркер JobScheduler.
+    { provide: NOTIFIER, useFactory: (config: AppConfig) => new QueueNotifier(config.redisUrl, 'bull'), inject: [APP_CONFIG] },
+    {
+      provide: NotificationDispatcher,
+      useFactory: (db: DbService, cipher: FieldCipher, tokens: ManageTokens, config: AppConfig, notifier: Notifier) =>
+        // Провайдеров пока нет: email и SMS в песочнице, push и мессенджеры появятся с подписками клиентов.
+        new NotificationDispatcher(db, cipher, tokens, [new SandboxChannel('email'), new SandboxChannel('sms')], config.publicUrl, notifier),
+      inject: [DbService, FieldCipher, ManageTokens, APP_CONFIG, NOTIFIER],
+    },
     {
       provide: CrmService,
       useFactory: (db: DbService, clients: ClientsService, hasher: PhoneHasher, cipher: FieldCipher) => new CrmService(db, clients, hasher, cipher),
@@ -95,9 +110,9 @@ class RedisShutdown implements OnApplicationShutdown {
     {
       // При WORKERS=false фоновые задачи выполняет другой процесс; здесь планировщика нет.
       provide: JobScheduler,
-      useFactory: (config: AppConfig, jobs: MaintenanceJobs) =>
-        config.workers ? new JobScheduler(jobs, { redisUrl: config.redisUrl, prefix: 'bull' }) : null,
-      inject: [APP_CONFIG, MaintenanceJobs],
+      useFactory: (config: AppConfig, jobs: MaintenanceJobs, dispatcher: NotificationDispatcher) =>
+        config.workers ? new JobScheduler(jobs, { redisUrl: config.redisUrl, prefix: 'bull' }, dispatcher) : null,
+      inject: [APP_CONFIG, MaintenanceJobs, NotificationDispatcher],
     },
     { provide: UsersService, useFactory: (db: DbService) => new UsersService(db), inject: [DbService] },
     { provide: AccountSettingsService, useFactory: (db: DbService) => new AccountSettingsService(db), inject: [DbService] },
@@ -124,8 +139,20 @@ class RedisShutdown implements OnApplicationShutdown {
         otp: OtpVerifier,
         limiter: RateLimiter,
         tokens: ManageTokens,
-      ) => new PublicBookingService(db, catalog, availability, bookings, clients, hasher, otp, limiter, tokens),
-      inject: [DbService, CatalogService, AvailabilityService, BookingsService, ClientsService, PhoneHasher, OTP_VERIFIER, RateLimiter, ManageTokens],
+        notifier: Notifier,
+      ) => new PublicBookingService(db, catalog, availability, bookings, clients, hasher, otp, limiter, tokens, notifier),
+      inject: [
+        DbService,
+        CatalogService,
+        AvailabilityService,
+        BookingsService,
+        ClientsService,
+        PhoneHasher,
+        OTP_VERIFIER,
+        RateLimiter,
+        ManageTokens,
+        NOTIFIER,
+      ],
     },
     { provide: ManageTokens, useFactory: (config: AppConfig) => new ManageTokens(config.fieldMasterKey), inject: [APP_CONFIG] },
     {

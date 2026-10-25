@@ -67,7 +67,7 @@ describe('фоновые задачи (D-017, D-049)', () => {
     assert.equal(await status(staleB.id), 'expired');
     assert.equal(await status(waitingA.id), 'pending');
     assert.deepEqual(
-      notifier.events.map((e) => [e.type, e.bookingId]).sort(),
+      notifier.events.map((e) => [e.type, 'bookingId' in e ? e.bookingId : null]).sort(),
       [
         ['booking.expired', staleA.id],
         ['booking.expired', staleB.id],
@@ -90,7 +90,7 @@ describe('фоновые задачи (D-017, D-049)', () => {
       new MaintenanceJobs(db.app, bookings, crm, notifier).run(),
     ]);
     assert.equal(x.reminded + y.reminded, 4);
-    const reminded = notifier.events.filter((e) => e.type === 'booking.master_reminder').map((e) => e.bookingId);
+    const reminded = notifier.events.flatMap((e) => (e.type === 'booking.master_reminder' ? [e.bookingId] : []));
     assert.equal(new Set(reminded).size, 4);
     const events = await db.admin.query("SELECT count(*)::int AS n FROM booking_events WHERE type = 'master_reminded' AND booking_id = ANY($1)", [ids.map((b) => b.id)]);
     assert.equal(events.rows[0].n, 4);

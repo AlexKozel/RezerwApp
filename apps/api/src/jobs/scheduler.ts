@@ -1,7 +1,10 @@
 import { Logger, type OnApplicationBootstrap, type OnApplicationShutdown } from '@nestjs/common';
 import { Queue, Worker } from 'bullmq';
 import { Redis } from 'ioredis';
+import type { NotificationDispatcher } from '../notifications/dispatcher';
+import { NOTIFICATIONS_QUEUE } from '../notifications/queue';
 import type { MaintenanceJobs } from './maintenance';
+import type { BookingNotification } from './notifier';
 
 export const MAINTENANCE_QUEUE = 'maintenance';
 export const MAINTENANCE_EVERY_MS = 60_000;
@@ -22,11 +25,14 @@ export class JobScheduler implements OnApplicationBootstrap, OnApplicationShutdo
   private readonly logger = new Logger('JobScheduler');
   private queue?: Queue;
   private worker?: Worker;
+  private notificationsWorker?: Worker;
   private connections: Redis[] = [];
 
   constructor(
     private readonly jobs: MaintenanceJobs,
     private readonly options: SchedulerOptions,
+    /** Доставка уведомлений из очереди notifications (D-052); без него воркер уведомлений не запускается. */
+    private readonly dispatcher?: NotificationDispatcher,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -48,6 +54,18 @@ export class JobScheduler implements OnApplicationBootstrap, OnApplicationShutdo
       concurrency: 1,
     });
     this.worker.on('failed', (_job, error) => this.logger.error(`maintenance failed: ${error.message}`));
+
+    const dispatcher = this.dispatcher;
+    if (dispatcher) {
+      this.notificationsWorker = new Worker(NOTIFICATIONS_QUEUE, (job) => dispatcher.dispatch(job.data as BookingNotification), {
+        connection: connect(),
+        prefix: this.options.prefix,
+        concurrency: 5,
+      });
+      this.notificationsWorker.on('failed', (job, error) =>
+        this.logger.warn(`notification ${job?.id} attempt ${job?.attemptsMade}: ${error.message}`),
+      );
+    }
     this.worker.on('completed', (_job, r: { expired: number; reminded: number; blacklistPurged: number }) => {
       if (r.expired + r.reminded + r.blacklistPurged > 0) {
         this.logger.log(`expired=${r.expired} reminded=${r.reminded} blacklistPurged=${r.blacklistPurged}`);
@@ -56,6 +74,7 @@ export class JobScheduler implements OnApplicationBootstrap, OnApplicationShutdo
   }
 
   async onApplicationShutdown(): Promise<void> {
+    await this.notificationsWorker?.close();
     await this.worker?.close();
     await this.queue?.close();
     await Promise.all(this.connections.map((c) => c.quit().catch(() => undefined)));
