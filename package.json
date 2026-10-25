@@ -13,7 +13,9 @@
     "db:migrate": "pnpm --filter @rezerwapp/api migrate",
     "create-master": "pnpm --filter @rezerwapp/api create-master",
     "legal:publish": "pnpm --filter @rezerwapp/api legal:publish",
-    "admin": "pnpm --filter @rezerwapp/api admin"
+    "admin": "pnpm --filter @rezerwapp/api admin",
+    "dev:all": "node scripts/dev-all.mjs",
+    "demo:reset": "node scripts/dev-all.mjs --reset --no-run"
   },
   "devDependencies": {
     "typescript": "^5.9.0"

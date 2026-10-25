@@ -12,7 +12,8 @@
     "create-master": "node dist/cli/create-master.js",
     "worker": "node dist/worker.js",
     "legal:publish": "node dist/cli/legal-publish.js",
-    "admin": "node dist/cli/admin.js"
+    "admin": "node dist/cli/admin.js",
+    "demo": "node dist/cli/demo.js"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",

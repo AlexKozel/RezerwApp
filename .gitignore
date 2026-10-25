@@ -10,3 +10,6 @@ coverage/
 .next/
 next-env.d.ts
 *.tsbuildinfo
+
+# Генерирует next dev (Next 16.4)
+apps/widget/AGENTS.md
