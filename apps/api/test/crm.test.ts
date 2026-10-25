@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 import { createMaster } from '../src/auth/auth.service';
 import { addDays, localDate, zonedToUtc } from '../src/availability/zoned-time';
-import { Client, TEST_OTP, createTestApp, type TestApp } from './helpers/app';
+import { Client, TEST_OTP, createTestApp, type TestApp, inviteUser } from './helpers/app';
 import { createTestDb, type TestDb } from './helpers/test-db';
 
 const PASSWORD = 'very secret 123';
@@ -53,8 +53,8 @@ describe('CRM (D-050): карточка, заметки, blacklist, экспор
     owner = await login('owner@crm.pl');
     const s1 = (await owner.post('/staff', { displayName: 'Ola', publicSlug: 'crm-ola' })).body.id;
     const s2 = (await owner.post('/staff', { displayName: 'Ewa', publicSlug: 'crm-ewa' })).body.id;
-    await owner.post('/users', { email: 'ola@crm.pl', role: 'staff', password: PASSWORD, staffId: s1 });
-    await owner.post('/users', { email: 'desk@crm.pl', role: 'assistant', password: PASSWORD });
+    await inviteUser(t.url, owner, { email: 'ola@crm.pl', role: 'staff', staffId: s1 }, PASSWORD);
+    await inviteUser(t.url, owner, { email: 'desk@crm.pl', role: 'assistant' }, PASSWORD);
     staff = await login('ola@crm.pl');
     assistant = await login('desk@crm.pl');
 

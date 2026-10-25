@@ -5,7 +5,7 @@ import { createMaster } from '../src/auth/auth.service';
 import { BookingsService } from '../src/bookings/bookings.service';
 import { InviteTokens } from '../src/locations/locations.service';
 import { ManageTokens } from '../src/public/manage-token';
-import { Client, TEST_CONFIG, createTestApp, type TestApp } from './helpers/app';
+import { Client, TEST_CONFIG, createTestApp, type TestApp, inviteUser } from './helpers/app';
 import { createTestDb, type TestDb } from './helpers/test-db';
 
 const PASSWORD = 'very secret 123';
@@ -43,7 +43,7 @@ describe('салоны: Location, Independent-мастера, общий кал�
     salon = await login('owner@roza.pl');
     indie = await login('kasia@nails.pl');
     outsider = await login('obcy@x.pl');
-    await salon.post('/users', { email: 'desk@roza.pl', role: 'assistant', password: PASSWORD });
+    await inviteUser(t.url, salon, { email: 'desk@roza.pl', role: 'assistant' }, PASSWORD);
     deskClient = await login('desk@roza.pl');
 
     // Запись Independent-мастера с клиентом в её собственном Account.

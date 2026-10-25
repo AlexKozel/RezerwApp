@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 import { createMaster } from '../src/auth/auth.service';
-import { Client, createTestApp, type TestApp } from './helpers/app';
+import { Client, createTestApp, type TestApp, inviteUser } from './helpers/app';
 import { createTestDb, type TestDb } from './helpers/test-db';
 
 const PASSWORD = 'very secret 123';
@@ -27,7 +27,7 @@ describe('ручная запись мастером и календарь', () 
     s2 = (await owner.post('/staff', { displayName: 'Ewa', publicSlug: 'manual-ewa' })).body.id;
     service = (await owner.post('/services', { name: { pl: 'Pedicure' }, variants: [{ name: { pl: 'Klasyczny' }, durationMin: 60, price: 140 }] })).body.service;
     for (const s of [s1, s2]) await owner.put(`/staff/${s}/services/${service.id}`);
-    await owner.post('/users', { email: 'ola@manual.pl', role: 'staff', password: PASSWORD, staffId: s1 });
+    await inviteUser(t.url, owner, { email: 'ola@manual.pl', role: 'staff', staffId: s1 }, PASSWORD);
     staffUser = new Client(t.url);
     await staffUser.post('/auth/login', { email: 'ola@manual.pl', password: PASSWORD });
   });

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { createMaster } from '../src/auth/auth.service';
 import { findLegalDir, publishLegal } from '../src/legal/legal.service';
-import { Client, createTestApp, type TestApp } from './helpers/app';
+import { Client, createTestApp, type TestApp, inviteUser } from './helpers/app';
 import { createTestDb, type TestDb } from './helpers/test-db';
 
 const PASSWORD = 'very secret 123';
@@ -26,7 +26,7 @@ describe('документы платформы и клиента (D-055)', () =
     await owner.post('/auth/login', { email: 'owner@lilia.pl', password: PASSWORD });
     // Пока документы не опубликованы, ничего не требуется (dev без юридических текстов).
     const staffId = (await owner.post('/staff', { displayName: 'Lilia', publicSlug: 'lilia' })).body.id;
-    await owner.post('/users', { email: 'ola@lilia.pl', role: 'staff', password: PASSWORD, staffId });
+    await inviteUser(t.url, owner, { email: 'ola@lilia.pl', role: 'staff', staffId }, PASSWORD);
     staffUser = new Client(t.url);
     await staffUser.post('/auth/login', { email: 'ola@lilia.pl', password: PASSWORD });
     draftDir = mkdtempSync(path.join(tmpdir(), 'legal-'));

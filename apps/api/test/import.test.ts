@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 import { createMaster } from '../src/auth/auth.service';
 import { parseCsv, unescapeFormula } from '../src/clients/csv';
-import { Client, createTestApp, type TestApp } from './helpers/app';
+import { Client, createTestApp, type TestApp, inviteUser } from './helpers/app';
 import { createTestDb, type TestDb } from './helpers/test-db';
 
 const PASSWORD = 'very secret 123';
@@ -119,7 +119,7 @@ describe('HTTP: импорт клиентов из CSV (D-054)', () => {
     const big = ['name,phone', ...Array.from({ length: 5001 }, (_, i) => `K${i},7${String(i).padStart(8, '0')}`)].join('\n');
     assert.deepEqual((await csv(owner, big, true)).body.details, { csv: 'at most 5000 rows' });
 
-    await owner.post('/users', { email: 'desk@import.pl', role: 'assistant', password: PASSWORD });
+    await inviteUser(t.url, owner, { email: 'desk@import.pl', role: 'assistant' }, PASSWORD);
     const desk = new Client(t.url);
     await desk.post('/auth/login', { email: 'desk@import.pl', password: PASSWORD });
     assert.equal((await csv(desk, file, true)).status, 403);

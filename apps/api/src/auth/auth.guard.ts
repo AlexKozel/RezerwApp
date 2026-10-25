@@ -15,6 +15,12 @@ export const Roles = Reflector.createDecorator<UserRole[]>();
 /** Маршрут доступен до принятия документов платформы (вход, профиль, пароль, сами документы; D-055). */
 export const SkipAcceptance = Reflector.createDecorator<true>();
 
+export class PasswordChangeRequiredError extends AppError {
+  constructor() {
+    super('PASSWORD_CHANGE_REQUIRED', 'The temporary password must be changed first');
+  }
+}
+
 export class ForbiddenError extends AppError {
   constructor() {
     super('FORBIDDEN', 'Not allowed for this role');
@@ -45,8 +51,8 @@ export class SessionGuard implements CanActivate {
 
     const skipAcceptance = this.reflector.getAllAndOverride(SkipAcceptance, [context.getHandler(), context.getClass()]) === true;
     const { user, pending } = await this.db.withAccount(stored.accountId, async (client) => {
-      const row = await client.query<{ role: UserRole }>(
-        "SELECT u.role FROM users u JOIN accounts a ON a.id = u.account_id WHERE u.id = $1 AND a.status = 'active'",
+      const row = await client.query<{ role: UserRole; must_change_password: boolean }>(
+        "SELECT u.role, u.must_change_password FROM users u JOIN accounts a ON a.id = u.account_id WHERE u.id = $1 AND a.status = 'active'",
         [stored.userId],
       );
       return { user: row.rows[0], pending: skipAcceptance || !row.rows[0] ? [] : await pendingPlatformDocuments(client) };
@@ -58,6 +64,8 @@ export class SessionGuard implements CanActivate {
 
     const allowed = this.reflector.getAllAndOverride(Roles, [context.getHandler(), context.getClass()]);
     if (allowed && !allowed.includes(user.role)) throw new ForbiddenError();
+    // Временный пароль знает owner: до смены открыты только маршруты с @SkipAcceptance (вход, профиль, пароль).
+    if (user.must_change_password && !skipAcceptance) throw new PasswordChangeRequiredError();
     if (pending.length > 0) throw new AcceptanceRequiredError(pending);
 
     req.session = { ...stored, role: user.role };

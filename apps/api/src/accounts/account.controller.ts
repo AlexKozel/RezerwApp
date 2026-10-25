@@ -49,6 +49,17 @@ export class AccountController {
     return this.users.update(s.accountId, id, { role, staffId });
   }
 
+  /** Сброс пароля сотрудника. Тело: { password } (временный, сотрудник сменит его при входе). */
+  @Post('users/:id/reset-password')
+  @Roles(['owner'])
+  @HttpCode(204)
+  async resetPassword(@CurrentSession() s: Session, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown): Promise<void> {
+    const input = new Input(body);
+    const password = input.string('password', { max: 1000 });
+    input.done();
+    await this.users.resetPassword(s.accountId, s.userId, id, password);
+  }
+
   @Delete('users/:id')
   @Roles(['owner'])
   @HttpCode(204)

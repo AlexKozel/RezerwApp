@@ -4,7 +4,7 @@ import { after, before, describe, test } from 'node:test';
 import { createMaster } from '../src/auth/auth.service';
 import { addDays, localDate, zonedToUtc } from '../src/availability/zoned-time';
 import { BookingsService } from '../src/bookings/bookings.service';
-import { Client, createTestApp, type TestApp } from './helpers/app';
+import { Client, createTestApp, type TestApp, inviteUser } from './helpers/app';
 import { createTestDb, type TestDb } from './helpers/test-db';
 
 const PASSWORD = 'very secret 123';
@@ -38,10 +38,10 @@ describe('роли внутри Account (DATA_MODEL.md, раздел 4)', () => 
 
     s1 = (await owner.post('/staff', { displayName: 'Ola', publicSlug: 'salon-ola' })).body.id;
     s2 = (await owner.post('/staff', { displayName: 'Ewa', publicSlug: 'salon-ewa' })).body.id;
-    const created = await owner.post('/users', { email: 'ola@salon.pl', role: 'staff', password: PASSWORD, staffId: s1 });
+    const created = await inviteUser(t.url, owner, { email: 'ola@salon.pl', role: 'staff', staffId: s1 }, PASSWORD);
     assert.equal(created.status, 201);
     staffUserId = created.body.id;
-    assert.equal((await owner.post('/users', { email: 'desk@salon.pl', role: 'assistant', password: PASSWORD })).status, 201);
+    assert.equal((await inviteUser(t.url, owner, { email: 'desk@salon.pl', role: 'assistant' }, PASSWORD)).status, 201);
     staffUser = await login('ola@salon.pl');
     assistant = await login('desk@salon.pl');
 

@@ -11,6 +11,26 @@ import { configureApp } from '../../src/http/configure';
 import type { BookingNotification, Notifier } from '../../src/jobs/notifier';
 import type { TestDb } from './test-db';
 
+/**
+ * Пригласить сотрудника, как в жизни (D-061): owner создаёт его с временным паролем, сотрудник входит
+ * и меняет пароль на password. Возвращает ответ POST /users.
+ */
+export async function inviteUser(
+  baseUrl: string,
+  owner: Client,
+  body: { email: string; role: string; staffId?: string },
+  password: string,
+): Promise<HttpResponse> {
+  const temporary = 'temporary password 1';
+  const created = await owner.post('/users', { ...body, password: temporary });
+  if (created.status !== 201) return created;
+  const user = new Client(baseUrl);
+  await user.post('/auth/login', { email: body.email, password: temporary });
+  const changed = await user.post('/auth/password', { currentPassword: temporary, newPassword: password });
+  if (changed.status !== 204) throw new Error(`password change for ${body.email}: ${changed.status}`);
+  return created;
+}
+
 /** Вместо очереди: события уведомлений копятся в памяти, тест их проверяет и при желании доставляет сам. */
 export class RecordingNotifier implements Notifier {
   readonly events: BookingNotification[] = [];

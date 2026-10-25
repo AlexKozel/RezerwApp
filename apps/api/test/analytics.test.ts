@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { after, before, describe, test } from 'node:test';
 import { createMaster } from '../src/auth/auth.service';
 import { BookingsService } from '../src/bookings/bookings.service';
-import { Client, createTestApp, type TestApp } from './helpers/app';
+import { Client, createTestApp, type TestApp, inviteUser } from './helpers/app';
 import { createTestDb, type TestDb } from './helpers/test-db';
 
 const PASSWORD = 'very secret 123';
@@ -33,8 +33,8 @@ describe('аналитика: «сколько вы сэкономили» и м
     await owner.patch('/account/payment', { blikPhone: '600700800' });
     const s1 = (await owner.post('/staff', { displayName: 'Ola', publicSlug: 'an-ola' })).body.id;
     const s2 = (await owner.post('/staff', { displayName: 'Ewa', publicSlug: 'an-ewa' })).body.id;
-    await owner.post('/users', { email: 'ola@an.pl', role: 'staff', password: PASSWORD, staffId: s1 });
-    await owner.post('/users', { email: 'desk@an.pl', role: 'assistant', password: PASSWORD });
+    await inviteUser(t.url, owner, { email: 'ola@an.pl', role: 'staff', staffId: s1 }, PASSWORD);
+    await inviteUser(t.url, owner, { email: 'desk@an.pl', role: 'assistant' }, PASSWORD);
     staffUser = await login('ola@an.pl');
     assistant = await login('desk@an.pl');
 
