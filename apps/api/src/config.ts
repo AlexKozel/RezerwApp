@@ -10,6 +10,8 @@ export interface AppConfig {
   /** Тестовый OTP-код alpha (D-035). */
   alphaOtpCode: string;
   cookieSecure: boolean;
+  /** Запускать фоновые задачи BullMQ в этом процессе (D-049). */
+  workers: boolean;
 }
 
 const DEV_PLACEHOLDERS = new Set(['change-me', '']);
@@ -46,5 +48,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     fieldMasterKey,
     alphaOtpCode,
     cookieSecure: env.COOKIE_SECURE !== undefined ? env.COOKIE_SECURE === 'true' : production,
+    workers: env.WORKERS !== 'false',
   };
 }

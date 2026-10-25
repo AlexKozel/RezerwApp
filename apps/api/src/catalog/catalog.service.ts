@@ -1,5 +1,6 @@
 import { checkDeposit, type DepositMode, type PrepaymentMethod } from '@rezerwapp/shared';
 import type { PoolClient } from 'pg';
+import { readPayment } from '../accounts/account-settings.service';
 import type { Db } from '../db/db';
 import { ConflictError, NotFoundError, ValidationError } from '../errors';
 
@@ -109,6 +110,14 @@ function depositWarning(service: Pick<ServiceInput, 'depositMode' | 'depositValu
   return warning;
 }
 
+/** Оплата manual_blik требует номера BLIK у Account (D-048): иначе клиенту некуда платить. */
+async function assertPaymentConfigured(client: PoolClient, service: Pick<ServiceInput, 'depositMode' | 'prepaymentMethod'>): Promise<void> {
+  if (service.depositMode === 'none' || service.prepaymentMethod !== 'manual_blik') return;
+  if ((await readPayment(client)).blikPhone === null) {
+    throw new ValidationError({ prepaymentMethod: 'set the BLIK phone number in account payment settings first' });
+  }
+}
+
 /** Каталог Account: специалисты, политики отмен, услуги с вариантами, кто какие услуги оказывает. */
 export class CatalogService {
   constructor(private readonly db: Db) {}
@@ -186,6 +195,7 @@ export class CatalogService {
     if (variants.length === 0) throw new ValidationError({ variants: 'at least one variant' });
     const warning = depositWarning(input, variants.map((v) => v.price));
     const id = await this.db.withAccount(accountId, async (client) => {
+      await assertPaymentConfigured(client, input);
       const row = await client.query<{ id: string }>(
         `INSERT INTO services (account_id, name_i18n, category, prepayment_method, deposit_mode, deposit_value, deposit_scope,
                                requires_manual_confirm, cancel_policy_id, cost_price)
@@ -215,6 +225,7 @@ export class CatalogService {
     const next = { ...current, ...patch };
     const warning = depositWarning(next, current.variants.filter((v) => v.active).map((v) => v.price));
     await this.db.withAccount(accountId, async (client) => {
+      if (next.active) await assertPaymentConfigured(client, next);
       await client.query(
         `UPDATE services SET name_i18n = $2, category = $3, prepayment_method = $4, deposit_mode = $5, deposit_value = $6,
                              deposit_scope = $7, requires_manual_confirm = $8, cancel_policy_id = $9, cost_price = $10, active = $11

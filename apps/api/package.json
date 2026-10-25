@@ -9,13 +9,15 @@
     "start": "node dist/main.js",
     "migrate": "node dist/db/migrate-cli.js",
     "test": "tsc -p tsconfig.test.json && node --test --test-concurrency=1 \".test-dist/test/*.test.js\"",
-    "create-master": "node dist/cli/create-master.js"
+    "create-master": "node dist/cli/create-master.js",
+    "worker": "node dist/worker.js"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",
     "@nestjs/platform-express": "^11.0.0",
     "@rezerwapp/shared": "workspace:*",
+    "bullmq": "^5.81.5",
     "ioredis": "^5.11.1",
     "pg": "^8.13.0",
     "reflect-metadata": "^0.2.2",

@@ -1,6 +1,7 @@
 import { randomInt } from 'node:crypto';
 import { normalizePhone, type BookingStatus, type DepositMode, type Locale } from '@rezerwapp/shared';
 import type { PoolClient } from 'pg';
+import { readPayment } from '../accounts/account-settings.service';
 import type { AvailabilityService } from '../availability/availability.service';
 import type { BookingsService } from '../bookings/bookings.service';
 import type { CatalogService } from '../catalog/catalog.service';
@@ -9,7 +10,10 @@ import type { PhoneHasher } from '../crypto/phone-hash';
 import type { Db } from '../db/db';
 import { AppError, ConflictError, NotFoundError, ValidationError } from '../errors';
 import type { RateLimiter } from '../rate-limit';
+import type { ManageTokens } from './manage-token';
 import type { OtpVerifier } from './otp';
+
+type ConsentType = 'terms' | 'privacy' | 'health';
 
 /** D-044: одновременных заявок pending с одного номера у одного специалиста. */
 export const MAX_PENDING_PER_PHONE = 2;
@@ -29,6 +33,8 @@ export interface PublicBookingInput {
   otpCode: string;
   acceptTerms: boolean;
   acceptPrivacy: boolean;
+  /** Необязательное согласие на обработку данных о здоровье (L-23). */
+  acceptHealth?: boolean;
   ip: string;
   now?: Date;
 }
@@ -39,7 +45,10 @@ export interface PublicBookingResult {
   startsAt: Date;
   endsAt: Date;
   holdExpiresAt: Date | null;
-  bookingFee: { amount: number; code: string; method: string } | null;
+  /** Инструкция оплаты (BOOKING_FLOW.md, раздел 4): сумма, код для комментария, номер BLIK и получатель. */
+  bookingFee: { amount: number; code: string; method: string; blikPhone: string | null; recipient: string | null } | null;
+  /** Токен ссылки управления записью (перенос, отмена), BOOKING_FLOW.md, раздел 5. */
+  manageToken: string;
 }
 
 interface ServiceTerms {
@@ -71,6 +80,7 @@ export class PublicBookingService {
     private readonly hasher: PhoneHasher,
     private readonly otp: OtpVerifier,
     private readonly limiter: RateLimiter,
+    private readonly tokens: ManageTokens,
   ) {}
 
   async resolve(slug: string): Promise<{ accountId: string; staffId: string }> {
@@ -122,7 +132,7 @@ export class PublicBookingService {
       if (!(await this.availability.isOffered(client, ctx, input.startsAt, now))) {
         throw new ConflictError('SLOT_NOT_AVAILABLE', 'This time is not offered');
       }
-      const documents = await this.legalVersions(client, input.language);
+      const documents = await this.legalVersions(client, input.language, input.acceptHealth ?? false);
 
       const person = await this.clients.findOrCreate(client, accountId, { phone, name: input.name, language: input.language });
       // Блокировка карточки клиента сериализует его параллельные заявки, иначе лимит D-044 обходится гонкой.
@@ -171,6 +181,7 @@ export class PublicBookingService {
         endsAt: booking.endsAt,
         holdExpiresAt: booking.holdExpiresAt,
         bookingFee,
+        manageToken: this.tokens.issue(accountId, booking.id),
       };
     });
   }
@@ -189,15 +200,19 @@ export class PublicBookingService {
     return row;
   }
 
-  /** Актуальные версии Regulamin и политики конфиденциальности на языке клиента (иначе польская, D-036). */
-  private async legalVersions(client: PoolClient, language: Locale): Promise<Array<['terms' | 'privacy', string]>> {
-    const rows = await client.query<{ type: 'terms' | 'privacy'; version: string }>(
+  /**
+   * Актуальные версии принятых клиентом текстов на его языке (иначе польская, D-036): Regulamin и политика
+   * всегда, согласие на данные о здоровье только если клиент его отметил (L-23, чекбокс не отмечен по умолчанию).
+   */
+  private async legalVersions(client: PoolClient, language: Locale, withHealth: boolean): Promise<Array<[ConsentType, string]>> {
+    const types: ConsentType[] = withHealth ? ['terms', 'privacy', 'health'] : ['terms', 'privacy'];
+    const rows = await client.query<{ type: ConsentType; version: string }>(
       `SELECT DISTINCT ON (type) type, version FROM consent_documents
-        WHERE type IN ('terms', 'privacy') AND language IN ($1, 'pl') AND valid_from <= now()
+        WHERE type = ANY($2) AND language IN ($1, 'pl') AND valid_from <= now()
         ORDER BY type, (language = $1) DESC, valid_from DESC`,
-      [language],
+      [language, types],
     );
-    if (rows.rows.length < 2) throw new AppError('LEGAL_TEXTS_MISSING', 'Terms or privacy policy are not published');
+    if (rows.rows.length < types.length) throw new AppError('LEGAL_TEXTS_MISSING', 'A required legal text is not published');
     return rows.rows.map((r) => [r.type, r.version]);
   }
 
@@ -211,6 +226,9 @@ export class PublicBookingService {
     const amount = Math.round(Math.min(raw, price / 2) * 100) / 100;
     if (amount <= 0) return null;
     const mode = terms.prepayment_method === 'provider_link' ? 'provider_link' : 'manual_blik';
+    const payment = await readPayment(client);
+    // Каталог не даёт сохранить такую услугу без номера (D-048), но номер могли стереть напрямую в БД.
+    if (mode === 'manual_blik' && !payment.blikPhone) throw new ConflictError('PAYMENT_NOT_CONFIGURED', 'BLIK phone is not set');
     for (let attempt = 0; attempt < 10; attempt += 1) {
       const code = paymentCode();
       const inserted = await client.query(
@@ -218,7 +236,7 @@ export class PublicBookingService {
          ON CONFLICT (account_id, code) DO NOTHING`,
         [accountId, bookingId, mode, amount, code],
       );
-      if (inserted.rowCount === 1) return { amount, code, method: mode };
+      if (inserted.rowCount === 1) return { amount, code, method: mode, blikPhone: payment.blikPhone, recipient: payment.recipient };
     }
     throw new Error('could not allocate a unique payment code');
   }

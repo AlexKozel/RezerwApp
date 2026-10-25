@@ -1,9 +1,14 @@
 /**
  * Ошибка предметной области с машинным кодом. HTTP-статус выбирает фильтр (http/error.filter.ts),
- * клиенту уходит только код, текст для разработчика.
+ * клиенту уходит код (и meta, если задано), текст только для разработчика.
  */
 export class AppError extends Error {
-  constructor(readonly code: string, message: string) {
+  constructor(
+    readonly code: string,
+    message: string,
+    /** Безопасные для клиента поля ответа, например id уже существующей записи. */
+    readonly meta?: Readonly<Record<string, unknown>>,
+  ) {
     super(message);
     this.name = new.target.name;
   }
@@ -16,8 +21,8 @@ export class NotFoundError extends AppError {
 }
 
 export class ConflictError extends AppError {
-  constructor(code: string, message: string) {
-    super(code, message);
+  constructor(code: string, message: string, meta?: Readonly<Record<string, unknown>>) {
+    super(code, message, meta);
   }
 }
 

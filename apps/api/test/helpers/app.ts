@@ -20,6 +20,8 @@ export const TEST_CONFIG: AppConfig = {
   fieldMasterKey: Buffer.alloc(32, 7),
   alphaOtpCode: TEST_OTP,
   cookieSecure: false,
+  // Фоновые задачи проверяются отдельно (jobs.test.ts), здесь они мешали бы детерминированности.
+  workers: false,
 };
 
 export interface TestApp {
@@ -84,7 +86,8 @@ export class Client {
       this.cookie = /Max-Age=0/.test(setCookie) ? undefined : pair;
     }
     const text = await res.text();
-    return { status: res.status, body: text ? JSON.parse(text) : undefined, headers: res.headers };
+    const json = (res.headers.get('content-type') ?? '').includes('application/json');
+    return { status: res.status, body: text ? (json ? JSON.parse(text) : text) : undefined, headers: res.headers };
   }
 
   get<T = any>(path: string) {
@@ -105,6 +108,12 @@ export class Client {
 
   get hasCookie(): boolean {
     return this.cookie !== undefined;
+  }
+
+  /** Сырые байты ответа: res.text() срезает BOM, а его наличие тоже надо проверять. */
+  async bytes(path: string): Promise<Buffer> {
+    const res = await fetch(this.base + path, { headers: this.cookie ? { cookie: this.cookie } : {} });
+    return Buffer.from(await res.arrayBuffer());
   }
 
   /** Копия с той же cookie: проверить, что сервер отзывает сессию, а не только браузер её забывает. */

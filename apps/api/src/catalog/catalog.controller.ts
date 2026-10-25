@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, UseGuards } from '@nestjs/common';
-import { CurrentSession, SessionGuard } from '../auth/auth.guard';
+import { CurrentSession, Roles, SessionGuard } from '../auth/auth.guard';
 import type { Session } from '../auth/session-store';
 import { Input } from '../http/validate';
 import { CatalogService, type ServiceInput, type VariantInput } from './catalog.service';
@@ -39,7 +39,7 @@ function withoutUndefined<T extends object>(value: T): Partial<T> {
   return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as Partial<T>;
 }
 
-/** Настройка каталога мастером. Account всегда из сессии. */
+/** Настройка каталога. Account всегда из сессии; менять каталог может только owner, читать любая роль. */
 @Controller()
 @UseGuards(SessionGuard)
 export class CatalogController {
@@ -51,6 +51,7 @@ export class CatalogController {
   }
 
   @Post('staff')
+  @Roles(['owner'])
   createStaff(@CurrentSession() s: Session, @Body() body: unknown) {
     const input = new Input(body);
     const displayName = input.string('displayName', { max: 100 });
@@ -65,6 +66,7 @@ export class CatalogController {
   }
 
   @Post('policies')
+  @Roles(['owner'])
   createPolicy(@CurrentSession() s: Session, @Body() body: unknown) {
     const input = new Input(body);
     const policy = {
@@ -84,6 +86,7 @@ export class CatalogController {
   }
 
   @Post('services')
+  @Roles(['owner'])
   createService(@CurrentSession() s: Session, @Body() body: unknown) {
     const input = new Input(body);
     const service = readService(input, false) as ServiceInput;
@@ -93,6 +96,7 @@ export class CatalogController {
   }
 
   @Patch('services/:id')
+  @Roles(['owner'])
   updateService(@CurrentSession() s: Session, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown) {
     const input = new Input(body);
     const patch = withoutUndefined(readService(input, true));
@@ -101,6 +105,7 @@ export class CatalogController {
   }
 
   @Post('services/:id/variants')
+  @Roles(['owner'])
   addVariant(@CurrentSession() s: Session, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown) {
     const input = new Input(body);
     const variant = readVariant(input, false) as VariantInput;
@@ -109,6 +114,7 @@ export class CatalogController {
   }
 
   @Patch('variants/:id')
+  @Roles(['owner'])
   updateVariant(@CurrentSession() s: Session, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown) {
     const input = new Input(body);
     const patch = withoutUndefined(readVariant(input, true));
@@ -117,6 +123,7 @@ export class CatalogController {
   }
 
   @Put('staff/:staffId/services/:serviceId')
+  @Roles(['owner'])
   @HttpCode(204)
   async assign(
     @CurrentSession() s: Session,
@@ -132,6 +139,7 @@ export class CatalogController {
   }
 
   @Delete('staff/:staffId/services/:serviceId')
+  @Roles(['owner'])
   @HttpCode(204)
   async unassign(
     @CurrentSession() s: Session,

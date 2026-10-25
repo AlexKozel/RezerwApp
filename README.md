@@ -52,15 +52,21 @@ pnpm --filter @rezerwapp/api start   # затем: curl localhost:$PORT/health �
 pnpm create-master --email anna@example.pl --account "Anna Nails" --slug anna-nails --name "Anna"
 ```
 
+Фоновые задачи (истечение hold, напоминание мастеру, D-049) по умолчанию работают в процессе API.
+Для отдельного процесса: API с `WORKERS=false` и `pnpm --filter @rezerwapp/api worker`.
+
 Перед первой публичной записью в `consent_documents` должны быть опубликованы Regulamin (`terms`) и политика
 (`privacy`) хотя бы на польском, иначе запись вернёт `LEGAL_TEXTS_MISSING`.
 
 API (все ответы JSON, ошибки вида `{"error": "CODE"}`):
 
-| Кто | Эндпоинты |
+| Кто (роли D-047) | Эндпоинты |
 |---|---|
-| Мастер (cookie `rz_sid`) | `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`; `GET/POST /staff`; `GET/POST /policies`; `GET/POST /services`, `PATCH /services/:id`, `POST /services/:id/variants`, `PATCH /variants/:id`; `PUT/DELETE /staff/:id/services/:serviceId`; `GET/PATCH /staff/:id/settings`; `GET/PUT /staff/:id/working-hours`; `POST /staff/:id/days-off`; `GET/POST /staff/:id/time-blocks`, `DELETE /staff/:id/time-blocks/:blockId`; `GET /staff/:id/slots`; `GET /bookings`, `POST /bookings/:id/transition` |
-| Клиент (без входа) | `GET /public/staff/:slug`, `GET /public/staff/:slug/slots?variantId&from&to`, `POST /public/otp`, `POST /public/staff/:slug/bookings` |
+| Любой вошедший (cookie `rz_sid`) | `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`, `POST /auth/password`; чтение `GET /staff`, `/policies`, `/services` |
+| owner | `GET/POST /users`, `PATCH/DELETE /users/:id`; `GET/PATCH /account/payment` (BLIK, D-048); `POST /staff`, `POST /policies`, `POST /services`, `PATCH /services/:id`, `POST /services/:id/variants`, `PATCH /variants/:id`, `PUT/DELETE /staff/:id/services/:serviceId` |
+| owner, assistant (все специалисты); staff (только свой) | `GET /staff/:id/settings` (`PATCH` без assistant); `GET/PUT /staff/:id/working-hours`; `POST /staff/:id/days-off`; `GET/POST /staff/:id/time-blocks`, `DELETE /staff/:id/time-blocks/:blockId`; `GET /staff/:id/slots`; `GET /bookings`, `POST /bookings/:id/transition` |
+| CRM (D-050): owner, assistant (вся база); staff (свои клиенты) | `GET/POST /clients` (`?search=` телефон или имя), `GET/PATCH /clients/:id`; заметки `GET/POST /clients/:id/notes`, `DELETE /clients/:id/notes/:noteId` и blacklist `POST/DELETE /clients/:id/blacklist` без assistant; только owner: `GET /clients/export?format=json\|csv`, `DELETE /clients/:id` (анонимизация), `GET /audit` |
+| Клиент (без входа) | `GET /public/staff/:slug`, `GET /public/staff/:slug/slots?variantId&from&to`, `POST /public/otp`, `POST /public/staff/:slug/bookings` (ответ содержит `manageToken`); по ссылке (D-051): `GET /public/bookings/:token`, `GET /public/bookings/:token/slots?from&to`, `POST /public/bookings/:token/cancel`, `POST /public/bookings/:token/reschedule` |
 
 Без локального `psql` (например, на Windows) psql и проверку БД можно запустить в контейнере:
 
