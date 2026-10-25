@@ -182,7 +182,15 @@ export class AvailabilityService {
     };
   }
 
-  async slotsWithin(client: PoolClient, ctx: SlotContext, fromDate: string, toDate: string, now: Date): Promise<Date[]> {
+  /** ignoreBookingId: при переносе собственная запись клиента не считается занятым временем. */
+  async slotsWithin(
+    client: PoolClient,
+    ctx: SlotContext,
+    fromDate: string,
+    toDate: string,
+    now: Date,
+    ignoreBookingId: string | null = null,
+  ): Promise<Date[]> {
     if (toDate < fromDate) throw new ValidationError({ to: 'must not be before from' });
     if (addDays(fromDate, MAX_SLOT_RANGE_DAYS) <= toDate) throw new ValidationError({ to: `at most ${MAX_SLOT_RANGE_DAYS} days` });
 
@@ -199,10 +207,11 @@ export class AvailabilityService {
       `SELECT lower(slot) AS s, upper(slot) AS e FROM bookings
         WHERE staff_id = $1 AND slot && tstzrange($2::timestamptz, $3::timestamptz)
           AND (status = 'confirmed' OR (status = 'pending' AND hold_expires_at > now()))
+          AND ($4::uuid IS NULL OR id <> $4)
        UNION ALL
        SELECT lower(range), upper(range) FROM time_blocks
         WHERE staff_id = $1 AND range && tstzrange($2::timestamptz, $3::timestamptz)`,
-      [ctx.staffId, rangeStart, rangeEnd],
+      [ctx.staffId, rangeStart, rangeEnd, ignoreBookingId],
     );
 
     return computeSlots({
@@ -221,9 +230,9 @@ export class AvailabilityService {
   }
 
   /** Проверка, что startsAt входит в предлагаемые слоты (публичная запись не может выбрать произвольное время). */
-  async isOffered(client: PoolClient, ctx: SlotContext, startsAt: Date, now: Date): Promise<boolean> {
+  async isOffered(client: PoolClient, ctx: SlotContext, startsAt: Date, now: Date, ignoreBookingId: string | null = null): Promise<boolean> {
     const date = localDate(startsAt, ctx.timeZone);
-    const slots = await this.slotsWithin(client, ctx, date, date, now);
+    const slots = await this.slotsWithin(client, ctx, date, date, now, ignoreBookingId);
     return slots.some((s) => s.getTime() === startsAt.getTime());
   }
 

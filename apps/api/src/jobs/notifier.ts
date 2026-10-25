@@ -3,7 +3,9 @@ import { Logger } from '@nestjs/common';
 /** События, о которых нужно сообщить клиенту или мастеру (BOOKING_FLOW.md, раздел 6). */
 export type BookingNotification =
   | { type: 'booking.expired'; accountId: string; bookingId: string }
-  | { type: 'booking.master_reminder'; accountId: string; bookingId: string; staffId: string };
+  | { type: 'booking.master_reminder'; accountId: string; bookingId: string; staffId: string }
+  | { type: 'booking.cancelled_by_client'; accountId: string; bookingId: string; late: boolean }
+  | { type: 'booking.rescheduled'; accountId: string; bookingId: string; fromBookingId: string };
 
 /**
  * Отправка уведомлений. Каналы (push, мессенджеры, email, SMS, D-035) появятся в модуле notifications;

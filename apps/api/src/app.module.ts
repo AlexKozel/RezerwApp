@@ -29,6 +29,8 @@ import { AppErrorFilter } from './http/error.filter';
 import { MaintenanceJobs } from './jobs/maintenance';
 import { LogNotifier, type Notifier } from './jobs/notifier';
 import { JobScheduler } from './jobs/scheduler';
+import { ManageBookingService } from './public/manage-booking.service';
+import { ManageTokens } from './public/manage-token';
 import { AlphaOtpVerifier, type OtpVerifier } from './public/otp';
 import { PublicController } from './public/public.controller';
 import { PublicBookingService } from './public/public-booking.service';
@@ -121,8 +123,22 @@ class RedisShutdown implements OnApplicationShutdown {
         hasher: PhoneHasher,
         otp: OtpVerifier,
         limiter: RateLimiter,
-      ) => new PublicBookingService(db, catalog, availability, bookings, clients, hasher, otp, limiter),
-      inject: [DbService, CatalogService, AvailabilityService, BookingsService, ClientsService, PhoneHasher, OTP_VERIFIER, RateLimiter],
+        tokens: ManageTokens,
+      ) => new PublicBookingService(db, catalog, availability, bookings, clients, hasher, otp, limiter, tokens),
+      inject: [DbService, CatalogService, AvailabilityService, BookingsService, ClientsService, PhoneHasher, OTP_VERIFIER, RateLimiter, ManageTokens],
+    },
+    { provide: ManageTokens, useFactory: (config: AppConfig) => new ManageTokens(config.fieldMasterKey), inject: [APP_CONFIG] },
+    {
+      provide: ManageBookingService,
+      useFactory: (
+        db: DbService,
+        availability: AvailabilityService,
+        bookings: BookingsService,
+        tokens: ManageTokens,
+        limiter: RateLimiter,
+        notifier: Notifier,
+      ) => new ManageBookingService(db, availability, bookings, tokens, limiter, notifier),
+      inject: [DbService, AvailabilityService, BookingsService, ManageTokens, RateLimiter, NOTIFIER],
     },
   ],
   exports: [DbService, BookingsService],

@@ -10,6 +10,7 @@ import type { PhoneHasher } from '../crypto/phone-hash';
 import type { Db } from '../db/db';
 import { AppError, ConflictError, NotFoundError, ValidationError } from '../errors';
 import type { RateLimiter } from '../rate-limit';
+import type { ManageTokens } from './manage-token';
 import type { OtpVerifier } from './otp';
 
 type ConsentType = 'terms' | 'privacy' | 'health';
@@ -46,6 +47,8 @@ export interface PublicBookingResult {
   holdExpiresAt: Date | null;
   /** Инструкция оплаты (BOOKING_FLOW.md, раздел 4): сумма, код для комментария, номер BLIK и получатель. */
   bookingFee: { amount: number; code: string; method: string; blikPhone: string | null; recipient: string | null } | null;
+  /** Токен ссылки управления записью (перенос, отмена), BOOKING_FLOW.md, раздел 5. */
+  manageToken: string;
 }
 
 interface ServiceTerms {
@@ -77,6 +80,7 @@ export class PublicBookingService {
     private readonly hasher: PhoneHasher,
     private readonly otp: OtpVerifier,
     private readonly limiter: RateLimiter,
+    private readonly tokens: ManageTokens,
   ) {}
 
   async resolve(slug: string): Promise<{ accountId: string; staffId: string }> {
@@ -177,6 +181,7 @@ export class PublicBookingService {
         endsAt: booking.endsAt,
         holdExpiresAt: booking.holdExpiresAt,
         bookingFee,
+        manageToken: this.tokens.issue(accountId, booking.id),
       };
     });
   }

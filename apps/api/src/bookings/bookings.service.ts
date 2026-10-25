@@ -1,6 +1,7 @@
 import { canTransition, type BookingStatus } from '@rezerwapp/shared';
 import type { PoolClient } from 'pg';
 import type { Db } from '../db/db';
+import { DEFAULT_POLICY, paymentOutcome, settlePayment, type LateCancelRule } from './payments';
 import {
   ClientBlockedError,
   HoldExpiredError,
@@ -44,6 +45,11 @@ export interface CreateBookingInput {
   capacity?: number;
   customFields?: Record<string, unknown>;
   actor?: Actor;
+  /**
+   * Перенос (BOOKING_FLOW.md, раздел 5): новая запись наследует снимок политики исходной (D-015),
+   * а не текущую политику услуги, и считает переносы.
+   */
+  reschedule?: { fromId: string; count: number; policyId: string | null; policyVersion: number | null };
 }
 
 export interface TransitionInput {
@@ -184,10 +190,10 @@ export class BookingsService {
       inserted = await client.query<BookingRow>(
         `INSERT INTO bookings
            (account_id, staff_id, client_id, service_id, variant_id, starts_at, ends_at, buffer_min,
-            capacity, status, hold_expires_at, policy_id, policy_version, custom_fields)
+            capacity, status, hold_expires_at, policy_id, policy_version, custom_fields, reschedule_count, rescheduled_from)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::text,
                  CASE WHEN $10::text = 'pending' THEN now() + make_interval(mins => $11::int) END,
-                 $12, $13, $14)
+                 $12, $13, $14, $15, $16)
          RETURNING *`,
         [
           input.accountId,
@@ -201,9 +207,11 @@ export class BookingsService {
           input.capacity ?? 1,
           status,
           holdMinutes,
-          policyRow.id,
-          policyRow.version,
+          input.reschedule ? input.reschedule.policyId : policyRow.id,
+          input.reschedule ? input.reschedule.policyVersion : policyRow.version,
           JSON.stringify(input.customFields ?? {}),
+          input.reschedule?.count ?? 0,
+          input.reschedule?.fromId ?? null,
         ],
       );
     } catch (error) {
@@ -213,7 +221,7 @@ export class BookingsService {
 
     const row = inserted.rows[0];
     if (!row) throw new Error('booking insert returned no row');
-    await addEvent(client, input.accountId, row.id, 'created', actor, { status });
+    await addEvent(client, input.accountId, row.id, 'created', actor, input.reschedule ? { status, rescheduledFrom: input.reschedule.fromId } : { status });
     return toBooking(row);
   }
 
@@ -232,37 +240,57 @@ export class BookingsService {
 
   /** Переводит запись в новый статус по правилам BOOKING_FLOW.md и пишет событие. */
   async transition(input: TransitionInput): Promise<Booking> {
-    return this.db.withAccount(input.accountId, async (client) => {
-      const current = await client.query<{ status: BookingStatus; version: number; hold_over: boolean | null }>(
-        `SELECT status, version, (hold_expires_at <= now()) AS hold_over
-           FROM bookings WHERE id = $1 FOR UPDATE`,
-        [input.bookingId],
-      );
-      const row = current.rows[0];
-      if (!row) throw new NotFoundError('booking');
-      if (input.expectedVersion !== undefined && input.expectedVersion !== row.version) {
-        throw new VersionConflictError();
-      }
-      if (!canTransition(row.status, input.to)) throw new InvalidTransitionError(row.status, input.to);
-      if (row.status === 'pending' && input.to === 'confirmed' && row.hold_over === true) {
-        throw new HoldExpiredError();
-      }
+    return this.db.withAccount(input.accountId, (client) => this.transitionIn(client, input));
+  }
 
-      const updated = await client.query<BookingRow>(
-        `UPDATE bookings
-            SET status = $2, hold_expires_at = NULL, version = version + 1
-          WHERE id = $1
-          RETURNING *`,
-        [input.bookingId, input.to],
-      );
-      const updatedRow = updated.rows[0];
-      if (!updatedRow) throw new NotFoundError('booking');
-      await addEvent(client, input.accountId, input.bookingId, 'status_changed', input.actor, {
-        from: row.status,
-        to: input.to,
-      });
-      return toBooking(updatedRow);
+  /** То же, что transition, внутри открытой транзакции. Заодно фиксирует судьбу оплаты (D-013). */
+  async transitionIn(client: PoolClient, input: TransitionInput): Promise<Booking> {
+    const current = await client.query<{
+      status: BookingStatus;
+      version: number;
+      hold_over: boolean | null;
+      late: boolean;
+      rule: LateCancelRule | null;
+    }>(
+      `SELECT b.status, b.version, (b.hold_expires_at <= now()) AS hold_over,
+              now() > b.starts_at - make_interval(hours => COALESCE(p.free_cancel_hours, $2::int)) AS late,
+              p.deposit_on_late_cancel AS rule
+         FROM bookings b
+         LEFT JOIN policies p ON p.account_id = b.account_id AND p.id = b.policy_id
+        WHERE b.id = $1
+        FOR UPDATE OF b`,
+      [input.bookingId, DEFAULT_POLICY.freeCancelHours],
+    );
+    const row = current.rows[0];
+    if (!row) throw new NotFoundError('booking');
+    if (input.expectedVersion !== undefined && input.expectedVersion !== row.version) {
+      throw new VersionConflictError();
+    }
+    if (!canTransition(row.status, input.to)) throw new InvalidTransitionError(row.status, input.to);
+    if (row.status === 'pending' && input.to === 'confirmed' && row.hold_over === true) {
+      throw new HoldExpiredError();
+    }
+
+    const updated = await client.query<BookingRow>(
+      `UPDATE bookings
+          SET status = $2, hold_expires_at = NULL, version = version + 1
+        WHERE id = $1
+        RETURNING *`,
+      [input.bookingId, input.to],
+    );
+    const updatedRow = updated.rows[0];
+    if (!updatedRow) throw new NotFoundError('booking');
+    const payment = await settlePayment(
+      client,
+      input.bookingId,
+      paymentOutcome(input.to, row.late, row.rule ?? DEFAULT_POLICY.depositOnLateCancel),
+    );
+    await addEvent(client, input.accountId, input.bookingId, 'status_changed', input.actor, {
+      from: row.status,
+      to: input.to,
+      ...(payment ? { payment } : {}),
     });
+    return toBooking(updatedRow);
   }
 
   /** Фоновая задача: переводит просроченные pending в expired. Возвращает число освобождённых слотов. */
