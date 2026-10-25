@@ -52,7 +52,10 @@ pnpm --filter @rezerwapp/api start   # затем: curl localhost:$PORT/health �
 pnpm create-master --email anna@example.pl --account "Anna Nails" --slug anna-nails --name "Anna"
 ```
 
-Фоновые задачи (истечение hold, напоминание мастеру, D-049) по умолчанию работают в процессе API.
+Уведомления (D-052) уходят через очередь `notifications`. Пока провайдеры не подключены, email и SMS работают
+в песочнице: доставка проходит целиком и видна в `notification_log` со статусом `sandbox`, но сообщения не отправляются.
+
+Фоновые задачи (истечение hold, напоминания мастеру и клиенту, доставка уведомлений, D-049) по умолчанию работают в процессе API.
 Для отдельного процесса: API с `WORKERS=false` и `pnpm --filter @rezerwapp/api worker`.
 
 Перед первой публичной записью в `consent_documents` должны быть опубликованы Regulamin (`terms`) и политика
