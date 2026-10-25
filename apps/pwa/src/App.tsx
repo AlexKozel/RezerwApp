@@ -4,6 +4,7 @@ import { api, onAuthProblem, type Me } from './api';
 import { LocaleProvider, initialLocale, saveLocale, useT } from './i18n';
 import { go, useRoute } from './router';
 import { Calendar } from './screens/Calendar';
+import { Catalog, ServiceEditor } from './screens/Catalog';
 import { ClientCardScreen, Clients } from './screens/Clients';
 import { Documents } from './screens/Documents';
 import { Login } from './screens/Login';
@@ -85,6 +86,8 @@ function Shell({ me, onLogout, onLocale }: { me: Me; onLogout: () => void; onLoc
   else if (screen === 'clients') content = <Clients />;
   else if (screen === 'new') content = <NewBooking me={me} day={param} />;
   else if (screen === 'stats') content = <Stats me={me} />;
+  else if (screen === 'services' && param) content = <ServiceEditor me={me} serviceId={param} />;
+  else if (screen === 'services') content = <Catalog me={me} />;
   else if (screen === 'settings') content = <Settings me={me} onLogout={onLogout} onLocale={onLocale} />;
   else content = <Calendar me={me} />;
 
@@ -102,7 +105,7 @@ function Shell({ me, onLogout, onLocale }: { me: Me; onLogout: () => void; onLoc
       {content}
       <nav className="tabs" style={{ ['--tabs' as string]: tabs.length }}>
         {tabs.map(([path, label]) => (
-          <a key={path} href={`#/${path}`} aria-current={screen === path || (path === 'calendar' && screen === 'new') ? 'page' : undefined} onClick={() => go(path)}>
+          <a key={path} href={`#/${path}`} aria-current={screen === path || (path === 'calendar' && screen === 'new') || (path === 'settings' && screen === 'services') ? 'page' : undefined} onClick={() => go(path)}>
             {t(label)}
           </a>
         ))}

@@ -93,6 +93,11 @@ export function Settings({ me, onLogout, onLocale }: { me: Me; onLogout: () => v
         </section>
       )}
 
+      <a className="option" href="#/services">
+        <span>{t('pwa.cat.title')}</span>
+        <span aria-hidden="true">›</span>
+      </a>
+
       {rows && (
         <section>
           <h2>{t('pwa.set.hours')}</h2>
