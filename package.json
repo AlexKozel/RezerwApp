@@ -12,7 +12,8 @@
     "verify:db": "bash scripts/verify-db.sh",
     "db:migrate": "pnpm --filter @rezerwapp/api migrate",
     "create-master": "pnpm --filter @rezerwapp/api create-master",
-    "legal:publish": "pnpm --filter @rezerwapp/api legal:publish"
+    "legal:publish": "pnpm --filter @rezerwapp/api legal:publish",
+    "admin": "pnpm --filter @rezerwapp/api admin"
   },
   "devDependencies": {
     "typescript": "^5.9.0"

@@ -11,7 +11,8 @@
     "test": "tsc -p tsconfig.test.json && node --test --test-concurrency=1 \".test-dist/test/*.test.js\"",
     "create-master": "node dist/cli/create-master.js",
     "worker": "node dist/worker.js",
-    "legal:publish": "node dist/cli/legal-publish.js"
+    "legal:publish": "node dist/cli/legal-publish.js",
+    "admin": "node dist/cli/admin.js"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",
