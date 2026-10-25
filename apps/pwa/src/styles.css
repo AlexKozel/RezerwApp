@@ -380,3 +380,9 @@ select.lang-select { width: auto; min-height: 36px; padding: 4px 8px; font-size:
 .month-day.off { background: var(--off); }
 .month-day.other { opacity: 0.45; }
 .month-day.today { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+
+/* Заголовок с действием справа (список клиентов) и выбор дня рождения (D-065). */
+.title-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.title-row .chip { text-decoration: none; flex: none; }
+.row.birthday > select { flex: 1; }
+.row.birthday > select:last-child { flex: 0 0 96px; }

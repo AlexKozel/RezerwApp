@@ -1,9 +1,11 @@
-import { formatWhen, type MessageKey } from '@rezerwapp/shared';
+import { formatBirthday, formatWhen, type MessageKey } from '@rezerwapp/shared';
 import { useCallback, useEffect, useState } from 'react';
 import { api, type ClientCard, type ClientSummary, type Me } from '../api';
 import { useT } from '../i18n';
+import { go } from '../router';
+import { BirthdayInput } from './NewClient';
 
-/** База клиентов (D-050): поиск по имени или телефону. staff видит только своих клиентов. */
+/** База клиентов (D-050, D-065): поиск по имени или телефону, добавление вручную. staff видит только своих клиентов. */
 export function Clients() {
   const { t } = useT();
   const [query, setQuery] = useState('');
@@ -19,7 +21,12 @@ export function Clients() {
 
   return (
     <main>
-      <h1>{t('pwa.nav.clients')}</h1>
+      <div className="title-row">
+        <h1>{t('pwa.nav.clients')}</h1>
+        <a className="chip" href="#/clients/new" onClick={() => go('clients/new')}>
+          + {t('pwa.clients.add')}
+        </a>
+      </div>
       <input type="search" aria-label={t('pwa.new.search')} placeholder={t('pwa.new.search')} value={query} onChange={(e) => setQuery(e.target.value)} />
       {list === null ? (
         <p className="muted">…</p>
@@ -45,16 +52,19 @@ interface Note {
 }
 
 /**
- * Карточка клиента: телефон (каждое открытие пишется в журнал аудита), история, заметки и blacklist.
- * Заметки и blacklist у owner и staff; assistant их не видит (D-050).
+ * Карточка клиента: телефон (каждое открытие пишется в журнал аудита), день рождения, история, заметки и blacklist.
+ * Заметки и blacklist у owner и staff; assistant их не видит (D-050). notice: откуда пришли из «Новый клиент»
+ * (exists: номер уже был в базе; linked: клиент другого мастера привязан к сотруднику, D-065).
  */
-export function ClientCardScreen({ me, clientId }: { me: Me; clientId: string }) {
+export function ClientCardScreen({ me, clientId, notice }: { me: Me; clientId: string; notice?: string }) {
   const { t, locale } = useT();
   const [card, setCard] = useState<ClientCard | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
   const [note, setNote] = useState('');
   const [health, setHealth] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editBirthday, setEditBirthday] = useState(false);
+  const [birthday, setBirthday] = useState<string | null>(null);
   const canNotes = me.role !== 'assistant';
   const hasHealthConsent = card?.consents.some((c) => c.type === 'health' && !c.revokedAt) ?? false;
 
@@ -78,6 +88,13 @@ export function ClientCardScreen({ me, clientId }: { me: Me; clientId: string })
     } else setError(t('pwa.error'));
   }
 
+  async function saveBirthday() {
+    const r = await api('PATCH', `/clients/${clientId}`, { birthday });
+    if (!r.ok) setError(t('pwa.error'));
+    setEditBirthday(false);
+    await load();
+  }
+
   async function toggleBlacklist() {
     const r = card?.blacklisted ? await api('DELETE', `/clients/${clientId}/blacklist`) : await api('POST', `/clients/${clientId}/blacklist`, {});
     if (!r.ok) setError(t('pwa.error'));
@@ -88,6 +105,8 @@ export function ClientCardScreen({ me, clientId }: { me: Me; clientId: string })
   return (
     <main>
       <h1>{card.anonymized ? '—' : card.name}</h1>
+      {notice === 'exists' && <p className="notice">{t('pwa.client.exists')}</p>}
+      {notice === 'linked' && <p className="notice">{t('pwa.client.linked', { business: me.accountName })}</p>}
       {card.phone && (
         <div className="link-row">
           <a className="secondary" href={`tel:${card.phone}`}>
@@ -97,6 +116,32 @@ export function ClientCardScreen({ me, clientId }: { me: Me; clientId: string })
         </div>
       )}
       {card.email && <p className="muted">{card.email}</p>}
+      {!card.anonymized &&
+        (editBirthday ? (
+          <div>
+            <label>{t('pwa.client.birthday')}</label>
+            <BirthdayInput value={birthday} onChange={setBirthday} />
+            <button type="button" className="secondary" onClick={() => void saveBirthday()}>
+              {t('pwa.set.save')}
+            </button>
+          </div>
+        ) : (
+          <p className="link-row">
+            <span>
+              {t('pwa.client.birthday')}: {card.birthday ? formatBirthday(card.birthday, locale) : <span className="muted">{t('pwa.client.birthday_none')}</span>}
+            </span>
+            <button
+              type="button"
+              className="chip"
+              onClick={() => {
+                setBirthday(card.birthday);
+                setEditBirthday(true);
+              }}
+            >
+              {t('pwa.client.edit')}
+            </button>
+          </p>
+        ))}
       <p>{t('pwa.client.stats', { completed: card.stats.completed, noShow: card.stats.noShow })}</p>
       {card.blacklisted && <p className="notice warn">{t('pwa.client.blacklisted', { date: new Date(card.blacklisted.expiresAt).toLocaleDateString(locale) })}</p>}
       {error && <p className="notice error">{error}</p>}

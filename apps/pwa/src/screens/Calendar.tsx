@@ -1,6 +1,6 @@
 import { formatDayLabel, formatMoney, formatTime, localDate, pickText, type MessageKey } from '@rezerwapp/shared';
 import { useCallback, useEffect, useState } from 'react';
-import { api, type CalendarBooking, type Me, type Staff } from '../api';
+import { api, type CalendarBooking, type ClientBirthday, type Me, type Staff } from '../api';
 import { useT } from '../i18n';
 import { addMonths, weekDays } from '../lib/calendar';
 import { addDays, dayRange, today } from '../lib/dates';
@@ -38,6 +38,7 @@ export function Calendar({ me }: { me: Me }) {
   const [staffId, setStaffId] = useState<string>('');
   const [bookings, setBookings] = useState<CalendarBooking[] | null>(null);
   const [requests, setRequests] = useState<CalendarBooking[]>([]);
+  const [birthdays, setBirthdays] = useState<ClientBirthday[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [view, setViewState] = useState<View>(savedView);
 
@@ -77,11 +78,13 @@ export function Calendar({ me }: { me: Me }) {
     const filter = staffId ? `&staffId=${staffId}` : '';
     const { from, to } = dayRange(day, tz);
     const ahead = dayRange(addDays(today(tz), REQUESTS_AHEAD_DAYS), tz);
-    const [dayList, upcoming] = await Promise.all([
+    const [dayList, upcoming, born] = await Promise.all([
       api<CalendarBooking[]>('GET', `/bookings?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}${filter}`),
       api<CalendarBooking[]>('GET', `/bookings?from=${encodeURIComponent(new Date().toISOString())}&to=${encodeURIComponent(ahead.to)}${filter}`),
+      api<ClientBirthday[]>('GET', `/clients/birthdays?from=${day}`),
     ]);
     setBookings(dayList.data ?? []);
+    setBirthdays(born.data ?? []);
     setRequests((upcoming.data ?? []).filter((b) => b.status === 'pending'));
     setError(dayList.ok ? null : t(dayList.error === 'OFFLINE' ? 'pwa.offline' : 'pwa.error'));
   }, [day, staffId, tz, t]);
@@ -193,6 +196,17 @@ export function Calendar({ me }: { me: Me }) {
       {error && (
         <p className="notice error" role="alert">
           {error}
+        </p>
+      )}
+      {view === 'day' && birthdays.length > 0 && (
+        <p className="notice birthdays">
+          🎂 {t('pwa.client.birthday')}:{' '}
+          {birthdays.map((b, i) => (
+            <span key={b.id}>
+              {i > 0 && ', '}
+              <a href={`#/clients/${b.id}`}>{b.name}</a>
+            </span>
+          ))}
         </p>
       )}
       {view === 'week' ? (

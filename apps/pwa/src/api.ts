@@ -7,6 +7,8 @@ export interface ApiResult<T> {
   status: number;
   data: T | undefined;
   error: string | undefined;
+  /** Тело ответа с ошибкой (например, clientId при CLIENT_EXISTS). */
+  details: Record<string, unknown> | undefined;
 }
 
 type Listener = (status: number, error: string | undefined) => void;
@@ -27,12 +29,12 @@ export async function api<T = unknown>(method: 'GET' | 'POST' | 'PUT' | 'PATCH' 
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
-    return { ok: false, status: 0, data: undefined, error: 'OFFLINE' };
+    return { ok: false, status: 0, data: undefined, error: 'OFFLINE', details: undefined };
   }
   const json = res.headers.get('content-type')?.includes('application/json') ? await res.json() : undefined;
   const error = res.ok ? undefined : (json?.error as string | undefined);
   if (res.status === 401 || error === 'ACCEPTANCE_REQUIRED' || error === 'PASSWORD_CHANGE_REQUIRED') listener(res.status, error);
-  return { ok: res.ok, status: res.status, data: res.ok ? (json as T) : undefined, error };
+  return { ok: res.ok, status: res.status, data: res.ok ? (json as T) : undefined, error, details: res.ok ? undefined : json };
 }
 
 export type Role = 'owner' | 'staff' | 'assistant';
@@ -88,10 +90,18 @@ export interface ClientSummary {
   anonymized: boolean;
 }
 
+export interface ClientBirthday {
+  date: string;
+  id: string;
+  name: string;
+}
+
 export interface ClientCard extends ClientSummary {
   phone: string | null;
   email: string | null;
   language: string;
+  /** "MM-DD" или null (D-065). */
+  birthday: string | null;
   blacklisted: { reason: string | null; expiresAt: string } | null;
   stats: { completed: number; noShow: number; cancelledByClient: number };
   bookings: Array<{ id: string; staffId: string; startsAt: string; status: string }>;

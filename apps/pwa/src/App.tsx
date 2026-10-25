@@ -10,6 +10,7 @@ import { ClientCardScreen, Clients } from './screens/Clients';
 import { Documents } from './screens/Documents';
 import { Login } from './screens/Login';
 import { NewBooking } from './screens/NewBooking';
+import { NewClient } from './screens/NewClient';
 import { Settings } from './screens/Settings';
 import { Stats } from './screens/Stats';
 import { Team } from './screens/Team';
@@ -86,7 +87,8 @@ function Shell({ me, onLogout, onLocale }: { me: Me; onLogout: () => void; onLoc
   ];
 
   let content;
-  if (screen === 'clients' && param) content = <ClientCardScreen me={me} clientId={param} />;
+  if (screen === 'clients' && param === 'new') content = <NewClient me={me} />;
+  else if (screen === 'clients' && param) content = <ClientCardScreen me={me} clientId={param} notice={extra} />;
   else if (screen === 'clients') content = <Clients />;
   else if (screen === 'new') content = <NewBooking me={me} day={param} time={extra} staffId={extra2} />;
   else if (screen === 'stats') content = <Stats me={me} />;
