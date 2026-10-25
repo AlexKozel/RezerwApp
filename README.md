@@ -65,6 +65,19 @@ pnpm create-master --email anna@example.pl --account "Anna Nails" --slug anna-na
 
 Администрирование в alpha (D-057): `pnpm admin` (список Account, карточка, приостановка, план, SMS).
 
+### Виджет записи клиента (`apps/widget`, D-058)
+
+Next.js, серверный рендер, PL/UK/RU/EN. Страницы: `/{slug}` (специалист и запись), `/b/{token}` (управление
+записью), `/l/{slug}` (страница салона), `/{slug}/legal/{type}` (документы).
+
+```bash
+# API на 3001 (PORT=3001 в .env) с TRUST_PROXY=loopback, затем:
+pnpm --filter @rezerwapp/widget dev        # http://localhost:3002/<slug мастера>
+```
+
+В браузере виджет обращается к `/api` своего домена: в разработке это прокси Next на `API_URL`, в проде
+`/api` должен вести на API через обратный прокси (nginx), а у API `TRUST_PROXY=1`.
+
 API (все ответы JSON, ошибки вида `{"error": "CODE"}`):
 
 | Кто (роли D-047) | Эндпоинты |

@@ -27,6 +27,8 @@ interface ManagedRow {
   free_cancel_hours: number | null;
   max_reschedules: number | null;
   staff_name: string;
+  staff_slug: string;
+  timezone: string;
   service_name: Record<string, string>;
   variant_name: Record<string, string>;
   pay_amount: string | null;
@@ -41,6 +43,10 @@ export interface ManagedBooking {
   startsAt: Date;
   endsAt: Date;
   staffName: string;
+  /** Для ссылки «записаться снова» на страницу специалиста. */
+  staffSlug: string;
+  /** Пояс Account: время визита показывается по нему, а не по браузеру. */
+  timeZone: string;
   service: Record<string, string>;
   variant: Record<string, string>;
   policy: { freeCancelHours: number; maxReschedules: number; rescheduleCount: number; deadline: Date };
@@ -100,6 +106,8 @@ export class ManageBookingService {
         startsAt: row.starts_at,
         endsAt: row.ends_at,
         staffName: row.staff_name,
+        staffSlug: row.staff_slug,
+        timeZone: row.timezone,
         service: row.service_name,
         variant: row.variant_name,
         policy: { freeCancelHours: r.freeCancelHours, maxReschedules: r.maxReschedules, rescheduleCount: row.reschedule_count, deadline: r.deadline },
@@ -190,7 +198,7 @@ export class ManageBookingService {
     const row = (await client.query<ManagedRow>(
       `SELECT b.id, b.account_id, b.staff_id, b.client_id, b.service_id, b.variant_id, b.starts_at, b.ends_at, b.status,
               b.reschedule_count, b.policy_id, b.policy_version, p.free_cancel_hours, p.max_reschedules,
-              st.display_name AS staff_name, sv.name_i18n AS service_name, v.name_i18n AS variant_name,
+              st.display_name AS staff_name, st.public_slug AS staff_slug, a.timezone, sv.name_i18n AS service_name, v.name_i18n AS variant_name,
               pr.amount AS pay_amount, pr.code AS pay_code, pr.status AS pay_status, a.blik_phone, a.payment_recipient
          FROM bookings b
          JOIN staff st ON st.id = b.staff_id
