@@ -6,6 +6,8 @@ const config: NextConfig = {
   // Сборка для контейнера: server.js с минимумом зависимостей.
   output: 'standalone',
   poweredByHeader: false,
+  // Доступ к dev-серверу с телефона в локальной сети (pnpm dev:lan, D-062).
+  allowedDevOrigins: process.env.DEV_ORIGINS?.split(','),
   // В браузере виджет обращается к /api того же домена; в проде это делает обратный прокси.
   async rewrites() {
     return [{ source: '/api/:path*', destination: `${API_URL}/:path*` }];

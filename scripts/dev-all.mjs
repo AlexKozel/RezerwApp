@@ -3,12 +3,14 @@
 // демо-данные, затем API (с фоновыми задачами), виджет клиента и PWA мастера с перезапуском при изменениях.
 //
 //   pnpm dev:all              # поднять всё
+//   pnpm dev:lan              # то же, плюс доступ с телефона в той же сети Wi-Fi
 //   pnpm demo:reset           # пересоздать демо-данные (серверы не запускаются)
 //
 // Без зависимостей: только Node. Работает в Windows (Git Bash, PowerShell) и Linux/macOS.
 import { spawn, spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, readFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
+import { networkInterfaces } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -16,7 +18,22 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = new Set(process.argv.slice(2));
 const resetDemo = args.has('--reset');
 const runServers = !args.has('--no-run');
+const lan = args.has('--lan');
 const isWindows = process.platform === 'win32';
+
+/**
+ * Адрес компьютера в домашней сети для телефона. Виртуальные адаптеры (WSL, Hyper-V, Docker, VirtualBox)
+ * пропускаем: телефон до них не достанет. Частные диапазоны 192.168/10 впереди 172.16-31 (там часто WSL).
+ */
+function lanAddress() {
+  const candidates = [];
+  for (const [name, addresses] of Object.entries(networkInterfaces())) {
+    if (/vEthernet|WSL|Hyper-V|docker|br-|veth|VirtualBox|VMware|Loopback/i.test(name)) continue;
+    for (const a of addresses ?? []) if (a.family === 'IPv4' && !a.internal) candidates.push(a.address);
+  }
+  const rank = (ip) => (ip.startsWith('192.168.') ? 0 : ip.startsWith('10.') ? 1 : 2);
+  return candidates.sort((a, b) => rank(a) - rank(b))[0] ?? null;
+}
 
 const PORTS = { api: 3001, widget: 3002, pwa: 5173 };
 const COLORS = { api: 36, worker: 35, widget: 33, pwa: 32, tsc: 90 };
@@ -49,7 +66,7 @@ function run(cmd, cmdArgs, { env, hint } = {}) {
 }
 
 /** .env (создаётся из .env.example при первом запуске) + обязательные значения для локальной схемы. */
-function loadEnv() {
+function loadEnv(host) {
   const file = path.join(root, '.env');
   if (!existsSync(file)) {
     copyFileSync(path.join(root, '.env.example'), file);
@@ -65,9 +82,12 @@ function loadEnv() {
     ...env,
     PORT: String(PORTS.api),
     TRUST_PROXY: 'loopback',
-    PUBLIC_URL: `http://localhost:${PORTS.widget}`,
+    // Ссылки в уведомлениях и «link in bio» должны открываться там, где тестируют: с телефона это адрес в сети.
+    PUBLIC_URL: `http://${host}:${PORTS.widget}`,
     API_URL: `http://localhost:${PORTS.api}`,
-    VITE_PUBLIC_URL: `http://localhost:${PORTS.widget}`,
+    VITE_PUBLIC_URL: `http://${host}:${PORTS.widget}`,
+    // Next в разработке отдаёт свои скрипты только разрешённым адресам, иначе страница с телефона не оживает.
+    ...(host !== 'localhost' && { DEV_ORIGINS: host }),
     NEXT_TELEMETRY_DISABLED: '1',
     FORCE_COLOR: '1',
   };
@@ -175,7 +195,9 @@ async function main() {
     }
   }
 
-  const env = loadEnv();
+  const host = lan ? lanAddress() : 'localhost';
+  if (!host) fail('Не найден адрес в локальной сети: подключите компьютер к Wi-Fi или запустите pnpm dev:all.');
+  const env = loadEnv(host);
 
   step('PostgreSQL и Redis');
   run('docker', ['compose', 'up', '-d', '--wait', 'postgres', 'redis'], { env, hint: 'docker compose logs postgres redis' });
@@ -196,8 +218,10 @@ async function main() {
   process.on('SIGINT', stopAll);
   process.on('SIGTERM', stopAll);
   startApi(env);
-  start('widget', 'pnpm', ['--filter', '@rezerwapp/widget', 'dev'], env);
-  start('pwa', 'pnpm', ['--filter', '@rezerwapp/pwa', 'dev', '--strictPort'], env);
+  // Без --lan серверы слушают только этот компьютер: демо-пароли известны всем, кто читал README.
+  // --force: Vite заново собирает @rezerwapp/shared (CommonJS, D-059), иначе берёт из кэша старые переводы.
+  start('widget', 'pnpm', ['--filter', '@rezerwapp/widget', 'dev', '--hostname', lan ? '0.0.0.0' : 'localhost'], env);
+  start('pwa', 'pnpm', ['--filter', '@rezerwapp/pwa', 'dev', '--strictPort', '--force', '--host', lan ? '0.0.0.0' : 'localhost'], env);
 
   const ready = await Promise.all([
     waitFor(`http://localhost:${PORTS.api}/health`, 60_000),
@@ -207,13 +231,21 @@ async function main() {
   const mark = (ok) => (ok ? '\x1b[32m✓\x1b[0m' : '\x1b[31m✖ не отвечает\x1b[0m');
   console.log(`
 \x1b[1mRezerwApp запущен\x1b[0m
-  ${mark(ready[2])} PWA мастера        http://localhost:${PORTS.pwa}
+  ${mark(ready[2])} PWA мастера        http://${host}:${PORTS.pwa}
        владелец          demo@rezerwapp.local / demo-owner-pass
        сотрудник         kasia@rezerwapp.local / demo-staff-pass
-  ${mark(ready[1])} Запись клиента     http://localhost:${PORTS.widget}/demo-studio
+  ${mark(ready[1])} Запись клиента     http://${host}:${PORTS.widget}/demo-studio
        код из SMS (alpha): ${env.ALPHA_OTP_CODE ?? '0000'}
   ${mark(ready[0])} API                http://localhost:${PORTS.api}/health
-
+${
+  lan
+    ? `
+  С телефона: та же сеть Wi-Fi, адреса выше. Не открывается: разрешите Node.js в брандмауэре Windows
+  для частных сетей (запрос при первом запуске) и проверьте, что сеть Wi-Fi в Windows «Частная».
+  Установка PWA на экран и офлайн по http недоступны (нужен https), остальное работает.
+`
+    : ''
+}
   Демо-данные заново: pnpm demo:reset   Остановить: Ctrl+C
 `);
 }

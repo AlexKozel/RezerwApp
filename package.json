@@ -15,6 +15,7 @@
     "legal:publish": "pnpm --filter @rezerwapp/api legal:publish",
     "admin": "pnpm --filter @rezerwapp/api admin",
     "dev:all": "node scripts/dev-all.mjs",
+    "dev:lan": "node scripts/dev-all.mjs --lan",
     "demo:reset": "node scripts/dev-all.mjs --reset --no-run"
   },
   "devDependencies": {
