@@ -3,10 +3,19 @@ import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { Redis } from 'ioredis';
 import { AppModule } from '../../src/app.module';
-import { APP_CONFIG, REDIS } from '../../src/app.tokens';
+import { APP_CONFIG, NOTIFIER, REDIS } from '../../src/app.tokens';
 import type { AppConfig } from '../../src/config';
 import { DbService } from '../../src/db/db.service';
+import type { BookingNotification, Notifier } from '../../src/jobs/notifier';
 import type { TestDb } from './test-db';
+
+/** Вместо очереди: события уведомлений копятся в памяти, тест их проверяет и при желании доставляет сам. */
+export class RecordingNotifier implements Notifier {
+  readonly events: BookingNotification[] = [];
+  async notify(event: BookingNotification): Promise<void> {
+    this.events.push(event);
+  }
+}
 
 export const TEST_REDIS_URL = process.env.TEST_REDIS_URL ?? 'redis://localhost:6380';
 export const TEST_OTP = '4321';
@@ -22,12 +31,16 @@ export const TEST_CONFIG: AppConfig = {
   cookieSecure: false,
   // Фоновые задачи проверяются отдельно (jobs.test.ts), здесь они мешали бы детерминированности.
   workers: false,
+  publicUrl: 'https://rezerw.test',
 };
 
 export interface TestApp {
   app: INestApplication;
   url: string;
   redis: Redis;
+  notifications: RecordingNotifier;
+  /** Сбросить счётчики лимитов частоты (для тестов, которым нужно много запросов с одного IP). */
+  resetRateLimits(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -37,11 +50,14 @@ export interface TestApp {
  */
 export async function createTestApp(db: TestDb): Promise<TestApp> {
   const redis = new Redis(TEST_REDIS_URL, { keyPrefix: `test:${randomBytes(4).toString('hex')}:`, maxRetriesPerRequest: 1 });
+  const notifications = new RecordingNotifier();
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(APP_CONFIG)
     .useValue(TEST_CONFIG)
     .overrideProvider(DbService)
     .useValue(db.app)
+    .overrideProvider(NOTIFIER)
+    .useValue(notifications)
     .overrideProvider(REDIS)
     .useValue(redis)
     .compile();
@@ -53,6 +69,12 @@ export async function createTestApp(db: TestDb): Promise<TestApp> {
     app,
     url: url.replace('[::1]', '127.0.0.1'),
     redis,
+    notifications,
+    async resetRateLimits() {
+      const prefix = redis.options.keyPrefix ?? '';
+      const keys = await redis.keys(`${prefix}rl:*`);
+      if (keys.length > 0) await redis.del(...keys.map((k) => k.slice(prefix.length)));
+    },
     async close() {
       // ioredis не добавляет keyPrefix к шаблону KEYS, а к DEL добавляет: шаблон с префиксом, ключи без него.
       const prefix = redis.options.keyPrefix ?? '';

@@ -10,6 +10,7 @@ import type { PhoneHasher } from '../crypto/phone-hash';
 import type { Db } from '../db/db';
 import { AppError, ConflictError, NotFoundError, ValidationError } from '../errors';
 import type { RateLimiter } from '../rate-limit';
+import { notifySafely, type Notifier } from '../jobs/notifier';
 import type { ManageTokens } from './manage-token';
 import type { OtpVerifier } from './otp';
 
@@ -81,6 +82,7 @@ export class PublicBookingService {
     private readonly otp: OtpVerifier,
     private readonly limiter: RateLimiter,
     private readonly tokens: ManageTokens,
+    private readonly notifier?: Notifier,
   ) {}
 
   async resolve(slug: string): Promise<{ accountId: string; staffId: string }> {
@@ -126,7 +128,7 @@ export class PublicBookingService {
 
     const { accountId, staffId } = await this.resolve(input.slug);
 
-    return this.db.withAccount(accountId, async (client) => {
+    const result = await this.db.withAccount(accountId, async (client): Promise<PublicBookingResult> => {
       const ctx = await this.availability.slotContext(client, staffId, input.variantId);
       const terms = await this.serviceTerms(client, staffId, input.serviceId, input.variantId);
       if (!(await this.availability.isOffered(client, ctx, input.startsAt, now))) {
@@ -184,6 +186,8 @@ export class PublicBookingService {
         manageToken: this.tokens.issue(accountId, booking.id),
       };
     });
+    await notifySafely(this.notifier, { type: 'booking.created', accountId, bookingId: result.bookingId, status: result.status });
+    return result;
   }
 
   private async serviceTerms(client: PoolClient, staffId: string, serviceId: string, variantId: string): Promise<ServiceTerms> {

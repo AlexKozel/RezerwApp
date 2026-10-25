@@ -26,6 +26,35 @@ export const pl = {
     'Nie wpisuj danych o stanie zdrowia (np. alergie, choroby), jeśli klient nie wyraził na to zgody.',
   'consent.health':
     'Wyrażam zgodę na przetwarzanie moich danych o stanie zdrowia (np. alergie) przez {master} w celu bezpiecznego wykonania usługi.',
+  // Уведомления (BOOKING_FLOW.md, раздел 6). Без слова «zadatek» (D-011).
+  'notify.subject':
+    'RezerwApp: {master}',
+  'notify.client.request_received':
+    'Zgłoszenie przyjęte: {service} u {master}, {date}. Czekamy na potwierdzenie specjalisty. Zarządzaj rezerwacją: {link}',
+  'notify.client.confirmed':
+    'Rezerwacja potwierdzona: {service} u {master}, {date}. Zmiana lub odwołanie: {link}',
+  'notify.client.rejected':
+    'Specjalista {master} nie może przyjąć rezerwacji na {date}. Wybierz inny termin: {link}',
+  'notify.client.expired':
+    'Czas na potwierdzenie rezerwacji na {date} u {master} minął. Wybierz nowy termin: {link}',
+  'notify.client.cancelled_by_master':
+    'Wizyta {date} u {master} została odwołana przez specjalistę. Opłata rezerwacyjna, jeśli była wpłacona, zostanie zwrócona. Nowy termin: {link}',
+  'notify.client.reminder':
+    'Przypomnienie: {service} u {master}, {date}. Zmiana terminu lub kontakt: {link}',
+  'notify.client.rescheduled':
+    'Termin zmieniony: {service} u {master}, nowy termin {date}. Zarządzaj rezerwacją: {link}',
+  'notify.master.new_request':
+    'Nowe zgłoszenie: {service}, {date}, klient {client}. Potwierdź lub odrzuć w aplikacji.',
+  'notify.master.new_booking':
+    'Nowa rezerwacja: {service}, {date}, klient {client}.',
+  'notify.master.reminder':
+    'Zgłoszenie na {date} (klient {client}) czeka na odpowiedź od 30 minut.',
+  'notify.master.cancelled_by_client':
+    'Klient {client} odwołał wizytę {date}.',
+  'notify.master.rescheduled':
+    'Klient {client} przeniósł wizytę na {date}.',
+  'notify.master.sms_quota':
+    'Wykorzystano {percent}% limitu SMS w tym miesiącu.',
 } as const;
 
 export type MessageKey = keyof typeof pl;

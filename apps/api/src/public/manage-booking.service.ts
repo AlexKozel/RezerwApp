@@ -1,4 +1,3 @@
-import { Logger } from '@nestjs/common';
 import type { BookingStatus } from '@rezerwapp/shared';
 import type { PoolClient } from 'pg';
 import type { AvailabilityService } from '../availability/availability.service';
@@ -6,7 +5,7 @@ import type { BookingsService } from '../bookings/bookings.service';
 import { DEFAULT_POLICY } from '../bookings/payments';
 import type { Db } from '../db/db';
 import { ConflictError, NotFoundError, ValidationError } from '../errors';
-import type { BookingNotification, Notifier } from '../jobs/notifier';
+import { notifySafely, type BookingNotification, type Notifier } from '../jobs/notifier';
 import type { RateLimiter } from '../rate-limit';
 import type { ManageTokens } from './manage-token';
 
@@ -79,8 +78,6 @@ function rules(row: ManagedRow, now: Date) {
  * просмотр, отмена, перенос. Правила берутся из снимка политики на момент исходной записи.
  */
 export class ManageBookingService {
-  private readonly logger = new Logger('ManageBooking');
-
   constructor(
     private readonly db: Db,
     private readonly availability: AvailabilityService,
@@ -210,11 +207,7 @@ export class ManageBookingService {
     return row;
   }
 
-  private async send(event: BookingNotification): Promise<void> {
-    try {
-      await this.notifier.notify(event);
-    } catch (error) {
-      this.logger.error(`notify ${event.type} booking=${event.bookingId}: ${(error as Error).message}`);
-    }
+  private send(event: BookingNotification): Promise<void> {
+    return notifySafely(this.notifier, event);
   }
 }

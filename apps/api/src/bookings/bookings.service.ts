@@ -1,6 +1,7 @@
 import { canTransition, type BookingStatus } from '@rezerwapp/shared';
 import type { PoolClient } from 'pg';
 import type { Db } from '../db/db';
+import { notifySafely, type Notifier } from '../jobs/notifier';
 import { DEFAULT_POLICY, paymentOutcome, settlePayment, type LateCancelRule } from './payments';
 import {
   ClientBlockedError,
@@ -119,7 +120,11 @@ async function addEvent(
 }
 
 export class BookingsService {
-  constructor(private readonly db: Db) {}
+  constructor(
+    private readonly db: Db,
+    /** Уведомления о смене статуса (D-052). Необязателен: тесты и CLI работают без него. */
+    private readonly notifier?: Notifier,
+  ) {}
 
   /**
    * Создаёт запись. Длительность и буфер берутся из БД (клиент их не присылает). Слот защищён ограничением
@@ -240,7 +245,9 @@ export class BookingsService {
 
   /** Переводит запись в новый статус по правилам BOOKING_FLOW.md и пишет событие. */
   async transition(input: TransitionInput): Promise<Booking> {
-    return this.db.withAccount(input.accountId, (client) => this.transitionIn(client, input));
+    const booking = await this.db.withAccount(input.accountId, (client) => this.transitionIn(client, input));
+    await notifySafely(this.notifier, { type: 'booking.status_changed', accountId: input.accountId, bookingId: booking.id, to: booking.status });
+    return booking;
   }
 
   /** То же, что transition, внутри открытой транзакции. Заодно фиксирует судьбу оплаты (D-013). */
@@ -313,6 +320,26 @@ export class BookingsService {
          RETURNING booking_id`,
       );
       return result.rows.map((r) => r.booking_id);
+    });
+  }
+
+  /**
+   * Подтверждённые визиты в ближайшие 24 часа, о которых клиенту ещё не напоминали (BOOKING_FLOW.md, раздел 6).
+   * Не напоминаем о записях, сделанных меньше чем за сутки: клиент только что получил подтверждение.
+   * Отметка client_reminded и SKIP LOCKED, как в markReminders.
+   */
+  async markClientReminders(accountId: string): Promise<string[]> {
+    return this.db.withAccount(accountId, async (client) => {
+      const due = await client.query<{ id: string }>(
+        `SELECT b.id FROM bookings b
+          WHERE b.status = 'confirmed' AND b.starts_at > now() AND b.starts_at <= now() + interval '24 hours'
+            AND b.created_at <= b.starts_at - interval '24 hours'
+            AND NOT EXISTS (SELECT 1 FROM booking_events e WHERE e.booking_id = b.id AND e.type = 'client_reminded')
+          ORDER BY b.starts_at
+          FOR UPDATE OF b SKIP LOCKED`,
+      );
+      for (const row of due.rows) await addEvent(client, accountId, row.id, 'client_reminded', 'system', {});
+      return due.rows.map((r) => r.id);
     });
   }
 
