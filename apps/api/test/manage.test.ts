@@ -58,8 +58,9 @@ describe('HTTP: перенос и отмена клиентом по ссылк�
   let paid: { id: string; variants: Array<{ id: string }> };
   let phoneSeq = 0;
 
-  // Сетка слотов идёт от местной полуночи с шагом 15 минут; Europe/Warsaw сдвинут на целые часы.
-  const slotAt = (msFromNow: number) => new Date(Math.ceil((Date.now() + msFromNow) / (15 * 60_000)) * 15 * 60_000);
+  // Сетка слотов идёт от местной полуночи с шагом 15 минут. Запас 4 часа до полуночи: тесты переносят запись
+  // до +2 часов, визит 60 минут, иначе вечерний запуск уводил перенос за конец рабочего дня (409).
+  const slotAt = (msFromNow: number) => slotWithinDay(msFromNow, 'Europe/Warsaw', 4 * 60);
   const book = async (service: typeof free, startsAt: Date) => {
     phoneSeq += 1;
     const r = await anon.post('/public/staff/manage-me/bookings', {
