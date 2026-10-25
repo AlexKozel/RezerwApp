@@ -31,10 +31,18 @@ export interface Variant extends VariantInput {
   active: boolean;
 }
 
+/** Кто оказывает услугу и с какими персональными длительностью и ценой (staff_services). */
+export interface StaffAssignment {
+  staffId: string;
+  overrideDurationMin: number | null;
+  overridePrice: number | null;
+}
+
 export interface Service extends ServiceInput {
   id: string;
   active: boolean;
   variants: Variant[];
+  staff: StaffAssignment[];
 }
 
 export interface PolicyInput {
@@ -75,7 +83,7 @@ function toVariant(r: VariantRow): Variant {
   return { id: r.id, name: r.name_i18n, durationMin: r.duration_min, bufferMin: r.buffer_min, price: Number(r.price), active: r.active };
 }
 
-function toService(r: ServiceRow, variants: Variant[]): Service {
+function toService(r: ServiceRow, variants: Variant[], staff: StaffAssignment[] = []): Service {
   return {
     id: r.id,
     name: r.name_i18n,
@@ -89,6 +97,7 @@ function toService(r: ServiceRow, variants: Variant[]): Service {
     costPrice: r.cost_price === null ? null : Number(r.cost_price),
     active: r.active,
     variants,
+    staff,
   };
 }
 
@@ -288,7 +297,19 @@ export class CatalogService {
         'SELECT * FROM service_variants WHERE service_id = ANY($1) ORDER BY price, duration_min',
         [services.rows.map((s) => s.id)],
       );
-      return services.rows.map((s) => toService(s, variants.rows.filter((v) => v.service_id === s.id).map(toVariant)));
+      const assigned = await client.query<{ service_id: string; staff_id: string; override_duration_min: number | null; override_price: string | null }>(
+        'SELECT service_id, staff_id, override_duration_min, override_price FROM staff_services WHERE service_id = ANY($1)',
+        [services.rows.map((s) => s.id)],
+      );
+      return services.rows.map((s) =>
+        toService(
+          s,
+          variants.rows.filter((v) => v.service_id === s.id).map(toVariant),
+          assigned.rows
+            .filter((a) => a.service_id === s.id)
+            .map((a) => ({ staffId: a.staff_id, overrideDurationMin: a.override_duration_min, overridePrice: a.override_price === null ? null : Number(a.override_price) })),
+        ),
+      );
     });
   }
 

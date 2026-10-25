@@ -65,6 +65,15 @@ describe('ручная запись мастером и календарь', () 
     assert.ok(!JSON.stringify(list).includes('500123456'));
   });
 
+  test('список услуг показывает, кто из специалистов их оказывает', async () => {
+    const [svc] = (await owner.get('/services')).body;
+    assert.deepEqual(
+      svc.staff.map((a: { staffId: string }) => a.staffId).sort(),
+      [s1, s2].sort(),
+    );
+    assert.deepEqual(Object.keys(svc.staff[0]).sort(), ['overrideDurationMin', 'overridePrice', 'staffId']);
+  });
+
   test('/auth/me отдаёт данные для интерфейса: Account, пояс, язык, специалист пользователя', async () => {
     const me = (await staffUser.get('/auth/me')).body;
     assert.deepEqual(
