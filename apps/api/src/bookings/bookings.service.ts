@@ -32,6 +32,27 @@ export interface Booking {
   version: number;
 }
 
+/** Запись для календаря мастера. */
+export interface CalendarBooking extends Booking {
+  clientName: string;
+  staffName: string;
+  serviceName: Record<string, string>;
+  variantName: Record<string, string>;
+  price: number | null;
+  payment: { amount: number; code: string; status: string } | null;
+}
+
+interface CalendarRow {
+  client_name: string;
+  staff_name: string;
+  service_name: Record<string, string>;
+  variant_name: Record<string, string>;
+  price: string | null;
+  pay_amount: string | null;
+  pay_code: string | null;
+  pay_status: string | null;
+}
+
 export interface CreateBookingInput {
   accountId: string;
   staffId: string;
@@ -233,16 +254,34 @@ export class BookingsService {
     return toBooking(row);
   }
 
-  /** Записи Account, начинающиеся в [from, to), для календаря мастера. */
-  async list(accountId: string, from: Date, to: Date, staffId?: string): Promise<Booking[]> {
+  /**
+   * Записи Account, начинающиеся в [from, to), для календаря мастера: с именем клиента, услугой и оплатой.
+   * Телефон клиента сюда не входит: он расшифровывается только в карточке клиента с записью в аудит (D-050).
+   */
+  async list(accountId: string, from: Date, to: Date, staffId?: string): Promise<CalendarBooking[]> {
     return this.db.withAccount(accountId, async (client) => {
-      const rows = await client.query<BookingRow>(
-        `SELECT * FROM bookings
-          WHERE starts_at >= $1 AND starts_at < $2 AND ($3::uuid IS NULL OR staff_id = $3)
-          ORDER BY starts_at`,
+      const rows = await client.query<BookingRow & CalendarRow>(
+        `SELECT b.*, c.name AS client_name, st.display_name AS staff_name, sv.name_i18n AS service_name, v.name_i18n AS variant_name,
+                pr.amount AS pay_amount, pr.code AS pay_code, pr.status AS pay_status
+           FROM bookings b
+           JOIN clients c ON c.id = b.client_id
+           JOIN staff st ON st.id = b.staff_id
+           JOIN services sv ON sv.id = b.service_id
+           JOIN service_variants v ON v.id = b.variant_id
+           LEFT JOIN payment_requests pr ON pr.booking_id = b.id
+          WHERE b.starts_at >= $1 AND b.starts_at < $2 AND ($3::uuid IS NULL OR b.staff_id = $3)
+          ORDER BY b.starts_at`,
         [from, to, staffId ?? null],
       );
-      return rows.rows.map(toBooking);
+      return rows.rows.map((r) => ({
+        ...toBooking(r),
+        clientName: r.client_name,
+        staffName: r.staff_name,
+        serviceName: r.service_name,
+        variantName: r.variant_name,
+        price: r.price === null ? null : Number(r.price),
+        payment: r.pay_code ? { amount: Number(r.pay_amount), code: r.pay_code, status: r.pay_status! } : null,
+      }));
     });
   }
 

@@ -16,6 +16,7 @@ import { AvailabilityController } from './availability/availability.controller';
 import { AvailabilityService } from './availability/availability.service';
 import { BookingsController } from './bookings/bookings.controller';
 import { BookingsService } from './bookings/bookings.service';
+import { ManualBookingService } from './bookings/manual-booking.service';
 import { CatalogController } from './catalog/catalog.controller';
 import { CatalogService } from './catalog/catalog.service';
 import { ClientsController } from './clients/clients.controller';
@@ -97,6 +98,12 @@ class RedisShutdown implements OnApplicationShutdown {
     },
     { provide: CatalogService, useFactory: (db: DbService) => new CatalogService(db), inject: [DbService] },
     { provide: StaffAccess, useFactory: (db: DbService) => new StaffAccess(db), inject: [DbService] },
+    {
+      provide: ManualBookingService,
+      useFactory: (db: DbService, bookings: BookingsService, clients: ClientsService, notifier: Notifier) =>
+        new ManualBookingService(db, bookings, clients, notifier),
+      inject: [DbService, BookingsService, ClientsService, NOTIFIER],
+    },
     // Уведомления ставятся в очередь BullMQ (D-052); доставляет воркер JobScheduler.
     { provide: NOTIFIER, useFactory: (config: AppConfig) => new QueueNotifier(config.redisUrl, 'bull'), inject: [APP_CONFIG] },
     {

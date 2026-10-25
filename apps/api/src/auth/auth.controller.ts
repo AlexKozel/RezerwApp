@@ -47,6 +47,7 @@ export class AuthController {
       userId: session.userId,
       accountId: session.accountId,
       role: session.role,
+      ...(await this.auth.profile(session.accountId, session.userId)),
       pendingDocuments: await this.legal.pending(session.accountId),
     };
   }

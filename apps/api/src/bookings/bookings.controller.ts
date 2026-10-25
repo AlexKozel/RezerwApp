@@ -1,10 +1,11 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
-import { BOOKING_STATUSES } from '@rezerwapp/shared';
+import { BOOKING_STATUSES, LOCALES } from '@rezerwapp/shared';
 import { StaffAccess } from '../auth/access';
 import { CurrentSession, SessionGuard } from '../auth/auth.guard';
 import type { Session } from '../auth/session-store';
 import { Input } from '../http/validate';
 import { BookingsService } from './bookings.service';
+import { ManualBookingService } from './manual-booking.service';
 
 /**
  * Календарь и заявки мастера: список за период, одобрение, отклонение, завершение и т.д.
@@ -16,7 +17,31 @@ export class BookingsController {
   constructor(
     private readonly bookings: BookingsService,
     private readonly access: StaffAccess,
+    private readonly manual: ManualBookingService,
   ) {}
+
+  /**
+   * Ручная запись (любая роль; staff только к себе). Тело: { staffId, serviceId, variantId, startsAt,
+   * clientId } или вместо clientId { client: { name, phone, language? } }.
+   */
+  @Post()
+  async create(@CurrentSession() s: Session, @Body() body: unknown) {
+    const input = new Input(body);
+    const staffId = input.uuid('staffId');
+    const serviceId = input.uuid('serviceId');
+    const variantId = input.uuid('variantId');
+    const startsAt = input.instant('startsAt');
+    const clientId = input.optUuid('clientId');
+    let client: { name: string; phone: string; language: (typeof LOCALES)[number] } | undefined;
+    if (!clientId) {
+      const c = new Input((body as Record<string, unknown> | null)?.client);
+      client = { name: c.string('name', { max: 100 }), phone: c.string('phone', { max: 30 }), language: c.optOneOf('language', LOCALES) ?? 'pl' };
+      c.done();
+    }
+    input.done();
+    await this.access.assertStaff(s, staffId);
+    return this.manual.create({ accountId: s.accountId, staffId, serviceId, variantId, startsAt, clientId, client });
+  }
 
   @Get()
   async list(@CurrentSession() s: Session, @Query() query: unknown) {

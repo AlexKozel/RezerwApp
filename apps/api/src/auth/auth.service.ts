@@ -113,6 +113,21 @@ export class AuthService {
     return { token, session: { ...data, createdAt: new Date().toISOString() } };
   }
 
+  /** Данные для интерфейса мастера: Account (название, пояс, язык), email и специалист пользователя. */
+  async profile(accountId: string, userId: string) {
+    return this.db.withAccount(accountId, async (client) => {
+      const row = (await client.query<{ name: string; timezone: string; locale: string; email: string; staff_id: string | null }>(
+        `SELECT a.name, a.timezone, a.locale, u.email, s.id AS staff_id
+           FROM users u JOIN accounts a ON a.id = u.account_id LEFT JOIN staff s ON s.user_id = u.id
+          WHERE u.id = $1`,
+        [userId],
+      )).rows[0];
+      return row
+        ? { accountName: row.name, timeZone: row.timezone, locale: row.locale, email: row.email, staffId: row.staff_id }
+        : null;
+    });
+  }
+
   async logout(token: string): Promise<void> {
     await this.sessions.destroy(token);
   }
