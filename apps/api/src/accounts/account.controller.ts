@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, UseGuards } from '@nestjs/common';
-import { CurrentSession, Roles, SessionGuard } from '../auth/auth.guard';
+import { CurrentSession, Roles, SessionGuard, SkipAcceptance } from '../auth/auth.guard';
 import type { Session } from '../auth/session-store';
 import { UsersService } from '../auth/users.service';
 import { Input } from '../http/validate';
@@ -57,6 +57,7 @@ export class AccountController {
   }
 
   @Post('auth/password')
+  @SkipAcceptance(true)
   @HttpCode(204)
   async changePassword(@CurrentSession() s: Session, @Body() body: unknown): Promise<void> {
     const input = new Input(body);

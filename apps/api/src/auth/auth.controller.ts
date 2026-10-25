@@ -4,14 +4,18 @@ import { APP_CONFIG } from '../app.tokens';
 import type { AppConfig } from '../config';
 import { serializeCookie } from '../http/cookies';
 import { Input } from '../http/validate';
-import { CurrentSession, SESSION_COOKIE, SessionGuard, SessionToken } from './auth.guard';
+import { LegalService } from '../legal/legal.service';
+import { CurrentSession, SESSION_COOKIE, SessionGuard, SessionToken, SkipAcceptance } from './auth.guard';
 import { AuthService } from './auth.service';
 import { SESSION_TTL_SEC, type Session } from './session-store';
 
+/** Вход, выход и профиль работают до принятия документов платформы (D-055). */
 @Controller('auth')
+@SkipAcceptance(true)
 export class AuthController {
   constructor(
     private readonly auth: AuthService,
+    private readonly legal: LegalService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
@@ -37,7 +41,13 @@ export class AuthController {
 
   @Get('me')
   @UseGuards(SessionGuard)
-  me(@CurrentSession() session: Session) {
-    return { userId: session.userId, accountId: session.accountId, role: session.role };
+  async me(@CurrentSession() session: Session) {
+    // pendingDocuments: что owner должен принять, прежде чем откроется кабинет (D-055).
+    return {
+      userId: session.userId,
+      accountId: session.accountId,
+      role: session.role,
+      pendingDocuments: await this.legal.pending(session.accountId),
+    };
   }
 }

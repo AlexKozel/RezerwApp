@@ -10,7 +10,8 @@
     "migrate": "node dist/db/migrate-cli.js",
     "test": "tsc -p tsconfig.test.json && node --test --test-concurrency=1 \".test-dist/test/*.test.js\"",
     "create-master": "node dist/cli/create-master.js",
-    "worker": "node dist/worker.js"
+    "worker": "node dist/worker.js",
+    "legal:publish": "node dist/cli/legal-publish.js"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",

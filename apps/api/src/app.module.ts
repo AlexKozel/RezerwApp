@@ -27,6 +27,8 @@ import { DbService } from './db/db.service';
 import { HealthController } from './health.controller';
 import { AppErrorFilter } from './http/error.filter';
 import { MaintenanceJobs } from './jobs/maintenance';
+import { LegalController } from './legal/legal.controller';
+import { LegalService } from './legal/legal.service';
 import { LocationsController } from './locations/locations.controller';
 import { InviteTokens, LocationsService } from './locations/locations.service';
 import type { Notifier } from './jobs/notifier';
@@ -60,6 +62,7 @@ class RedisShutdown implements OnApplicationShutdown {
     CatalogController,
     ClientsController,
     LocationsController,
+    LegalController,
     AvailabilityController,
     BookingsController,
     PublicController,
@@ -158,6 +161,11 @@ class RedisShutdown implements OnApplicationShutdown {
       ],
     },
     { provide: ManageTokens, useFactory: (config: AppConfig) => new ManageTokens(config.fieldMasterKey), inject: [APP_CONFIG] },
+    {
+      provide: LegalService,
+      useFactory: (db: DbService, hasher: PhoneHasher) => new LegalService(db, hasher),
+      inject: [DbService, PhoneHasher],
+    },
     {
       provide: LocationsService,
       useFactory: (db: DbService, config: AppConfig) => new LocationsService(db, new InviteTokens(config.fieldMasterKey)),
