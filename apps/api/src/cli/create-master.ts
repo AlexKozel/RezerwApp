@@ -3,6 +3,7 @@ import { isLocale } from '@rezerwapp/shared';
 import { createMaster } from '../auth/auth.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { Db, createPool } from '../db/db';
+import { describeError } from './describe-error';
 
 /**
  * Выдача доступа мастеру в alpha (D-005: вручную, без публичной регистрации).
@@ -53,6 +54,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.message : error);
+  console.error(describeError(error));
   process.exit(1);
 });
