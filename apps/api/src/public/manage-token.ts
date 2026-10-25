@@ -37,8 +37,11 @@ export class ManageTokens {
     const [, payload, mac] = parts as [string, string, string];
     const expected = this.mac(payload);
     const given = Buffer.from(mac, 'base64url');
-    if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
     const bytes = Buffer.from(payload, 'base64url');
+    // Только каноническая запись: декодер игнорирует лишние биты последнего символа, и без этой проверки
+    // у одного токена было бы несколько допустимых строк (например, окончание «w» и «x»).
+    if (given.toString('base64url') !== mac || bytes.toString('base64url') !== payload) return null;
+    if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
     if (bytes.length !== 32) return null;
     const [a, b] = [bytes.subarray(0, 16), bytes.subarray(16)];
     if (!UUID_HEX.test(a.toString('hex')) || !UUID_HEX.test(b.toString('hex'))) return null;
