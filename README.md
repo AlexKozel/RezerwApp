@@ -31,6 +31,29 @@
 
 Нужны Node 22+, pnpm 10, PostgreSQL 16 и Redis 7 (или Docker) и `psql`.
 
+### Всё локально одной командой (D-062)
+
+Нужны только Node, pnpm и запущенный Docker:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm dev:all        # БД и Redis в Docker, сборка, миграции, демо-данные, API + виджет + PWA
+pnpm demo:reset     # вернуть демо-данные в исходное состояние (можно при запущенном dev:all)
+```
+
+| Что | Адрес | Вход |
+|---|---|---|
+| PWA мастера | http://localhost:5173 | владелец `demo@rezerwapp.local` / `demo-owner-pass`, сотрудник `kasia@rezerwapp.local` / `demo-staff-pass` |
+| Запись клиента | http://localhost:3002/demo-studio | код из SMS: `0000` (`ALPHA_OTP_CODE`) |
+| API | http://localhost:3001/health | |
+
+`.env` создаётся из `.env.example` при первом запуске. Демо: Account «Demo Studio» со специалистами Anna и Kasia,
+три услуги (одна с резервационной оплатой BLIK и ручным подтверждением), график, клиенты, записи на вчера, сегодня,
+завтра и заявка с оплатой. Изменения в `apps/api/src` перезапускают API, виджет и PWA обновляются сами.
+Ctrl+C останавливает всё; БД и Redis остаются в Docker (`docker compose stop`).
+
+### По шагам
+
 ```bash
 pnpm install --frozen-lockfile
 docker compose up -d         # PostgreSQL 16 и Redis (или свой PostgreSQL)
