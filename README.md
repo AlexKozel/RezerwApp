@@ -58,8 +58,12 @@ pnpm create-master --email anna@example.pl --account "Anna Nails" --slug anna-na
 Фоновые задачи (истечение hold, напоминания мастеру и клиенту, доставка уведомлений, D-049) по умолчанию работают в процессе API.
 Для отдельного процесса: API с `WORKERS=false` и `pnpm --filter @rezerwapp/api worker`.
 
-Перед первой публичной записью в `consent_documents` должны быть опубликованы Regulamin (`terms`) и политика
-(`privacy`) хотя бы на польском, иначе запись вернёт `LEGAL_TEXTS_MISSING`.
+Юридические тексты лежат в `legal/` (сейчас заглушки, см. `legal/README.md`) и публикуются командой
+`pnpm legal:publish <версия>`. Без опубликованных `terms` и `privacy` публичная запись отвечает `LEGAL_TEXTS_MISSING`.
+После публикации документов платформы (`platform_terms`, `dpa`, `platform_privacy`) кабинет Account открывается
+только после их принятия owner'ом (`GET /legal/platform`, `POST /legal/accept`, D-055).
+
+Администрирование в alpha (D-057): `pnpm admin` (список Account, карточка, приостановка, план, SMS).
 
 API (все ответы JSON, ошибки вида `{"error": "CODE"}`):
 
@@ -70,7 +74,8 @@ API (все ответы JSON, ошибки вида `{"error": "CODE"}`):
 | owner, assistant (все специалисты); staff (только свой) | `GET /staff/:id/settings` (`PATCH` без assistant); `GET/PUT /staff/:id/working-hours`; `POST /staff/:id/days-off`; `GET/POST /staff/:id/time-blocks`, `DELETE /staff/:id/time-blocks/:blockId`; `GET /staff/:id/slots`; `GET /bookings`, `POST /bookings/:id/transition` |
 | CRM (D-050): owner, assistant (вся база); staff (свои клиенты) | `GET/POST /clients` (`?search=` телефон или имя), `GET/PATCH /clients/:id`; заметки `GET/POST /clients/:id/notes`, `DELETE /clients/:id/notes/:noteId` и blacklist `POST/DELETE /clients/:id/blacklist` без assistant; только owner: `GET /clients/export?format=json\|csv`, `POST /clients/import[?dryRun=true]` (тело `text/csv`, D-054), `DELETE /clients/:id` (анонимизация), `GET /audit` |
 | Салоны (D-053) | owner: `GET/POST /locations`, `PATCH /locations/:id`, `PUT /staff/:id/location`, `POST /locations/:id/invites`, `GET /memberships`, `POST /memberships/accept`, `POST /memberships/:id/end`; owner и assistant: `GET /locations` и `GET /locations/:id/calendar?from&to` |
-| Клиент (без входа) | `GET /public/locations/:slug` (Studio page), `GET /public/staff/:slug`, `GET /public/staff/:slug/slots?variantId&from&to`, `POST /public/otp`, `POST /public/staff/:slug/bookings` (ответ содержит `manageToken`); по ссылке (D-051): `GET /public/bookings/:token`, `GET /public/bookings/:token/slots?from&to`, `POST /public/bookings/:token/cancel`, `POST /public/bookings/:token/reschedule` |
+| Документы и аналитика | любой вошедший: `GET /legal/platform`; owner: `POST /legal/accept`; owner и staff (свои записи): `GET /analytics/summary?from&to[&commissionPercent]` (D-056) |
+| Клиент (без входа) | `GET /public/staff/:slug/legal/:type`, `GET /public/locations/:slug` (Studio page), `GET /public/staff/:slug`, `GET /public/staff/:slug/slots?variantId&from&to`, `POST /public/otp`, `POST /public/staff/:slug/bookings` (ответ содержит `manageToken`); по ссылке (D-051): `GET /public/bookings/:token`, `GET /public/bookings/:token/slots?from&to`, `POST /public/bookings/:token/cancel`, `POST /public/bookings/:token/reschedule` |
 
 Без локального `psql` (например, на Windows) psql и проверку БД можно запустить в контейнере:
 

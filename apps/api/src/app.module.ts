@@ -3,6 +3,8 @@ import { APP_FILTER } from '@nestjs/core';
 import { Redis } from 'ioredis';
 import { AccountController } from './accounts/account.controller';
 import { AccountSettingsService } from './accounts/account-settings.service';
+import { AnalyticsController } from './analytics/analytics.controller';
+import { AnalyticsService } from './analytics/analytics.service';
 import { APP_CONFIG, NOTIFIER, OTP_VERIFIER, REDIS } from './app.tokens';
 import { StaffAccess } from './auth/access';
 import { AuthController } from './auth/auth.controller';
@@ -27,6 +29,8 @@ import { DbService } from './db/db.service';
 import { HealthController } from './health.controller';
 import { AppErrorFilter } from './http/error.filter';
 import { MaintenanceJobs } from './jobs/maintenance';
+import { LegalController } from './legal/legal.controller';
+import { LegalService } from './legal/legal.service';
 import { LocationsController } from './locations/locations.controller';
 import { InviteTokens, LocationsService } from './locations/locations.service';
 import type { Notifier } from './jobs/notifier';
@@ -60,6 +64,8 @@ class RedisShutdown implements OnApplicationShutdown {
     CatalogController,
     ClientsController,
     LocationsController,
+    LegalController,
+    AnalyticsController,
     AvailabilityController,
     BookingsController,
     PublicController,
@@ -158,6 +164,12 @@ class RedisShutdown implements OnApplicationShutdown {
       ],
     },
     { provide: ManageTokens, useFactory: (config: AppConfig) => new ManageTokens(config.fieldMasterKey), inject: [APP_CONFIG] },
+    { provide: AnalyticsService, useFactory: (db: DbService) => new AnalyticsService(db), inject: [DbService] },
+    {
+      provide: LegalService,
+      useFactory: (db: DbService, hasher: PhoneHasher) => new LegalService(db, hasher),
+      inject: [DbService, PhoneHasher],
+    },
     {
       provide: LocationsService,
       useFactory: (db: DbService, config: AppConfig) => new LocationsService(db, new InviteTokens(config.fieldMasterKey)),

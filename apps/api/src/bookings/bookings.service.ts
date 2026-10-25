@@ -138,8 +138,9 @@ export class BookingsService {
   /** То же, что create, внутри уже открытой транзакции withAccount (для сценариев из нескольких шагов). */
   async createIn(client: PoolClient, input: CreateBookingInput): Promise<Booking> {
     const actor = input.actor ?? 'client';
-    const variant = await client.query<{ duration_min: number; buffer_min: number }>(
-      `SELECT COALESCE(ss.override_duration_min, v.duration_min) AS duration_min, v.buffer_min
+    const variant = await client.query<{ duration_min: number; buffer_min: number; price: string }>(
+      `SELECT COALESCE(ss.override_duration_min, v.duration_min) AS duration_min, v.buffer_min,
+              COALESCE(ss.override_price, v.price) AS price
          FROM service_variants v
          JOIN staff_services ss ON ss.service_id = v.service_id AND ss.staff_id = $1
         WHERE v.id = $2 AND v.service_id = $3 AND v.active`,
@@ -195,10 +196,10 @@ export class BookingsService {
       inserted = await client.query<BookingRow>(
         `INSERT INTO bookings
            (account_id, staff_id, client_id, service_id, variant_id, starts_at, ends_at, buffer_min,
-            capacity, status, hold_expires_at, policy_id, policy_version, custom_fields, reschedule_count, rescheduled_from)
+            capacity, status, hold_expires_at, policy_id, policy_version, custom_fields, reschedule_count, rescheduled_from, price)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::text,
                  CASE WHEN $10::text = 'pending' THEN now() + make_interval(mins => $11::int) END,
-                 $12, $13, $14, $15, $16)
+                 $12, $13, $14, $15, $16, $17)
          RETURNING *`,
         [
           input.accountId,
@@ -217,6 +218,8 @@ export class BookingsService {
           JSON.stringify(input.customFields ?? {}),
           input.reschedule?.count ?? 0,
           input.reschedule?.fromId ?? null,
+          // Снимок цены (D-056): персональная цена специалиста или цена варианта на момент записи.
+          variantRow.price,
         ],
       );
     } catch (error) {

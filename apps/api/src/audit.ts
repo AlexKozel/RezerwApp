@@ -10,7 +10,12 @@ export type AuditAction =
   | 'blacklist.add'
   | 'blacklist.remove'
   | 'clients.export'
-  | 'clients.import';
+  | 'clients.import'
+  | 'admin.active'
+  | 'admin.suspended'
+  | 'admin.closed'
+  | 'admin.plan'
+  | 'admin.sms';
 
 /**
  * Запись в audit_log (только добавление, D-038) в той же транзакции, что и само действие:
@@ -19,7 +24,8 @@ export type AuditAction =
 export async function audit(
   client: PoolClient,
   accountId: string,
-  actorId: string,
+  /** Пользователь Account; null: действие администратора платформы (CLI admin, D-057). */
+  actorId: string | null,
   action: AuditAction,
   objectType: string | null = null,
   objectId: string | null = null,
