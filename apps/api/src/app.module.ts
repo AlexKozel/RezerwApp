@@ -3,6 +3,8 @@ import { APP_FILTER } from '@nestjs/core';
 import { Redis } from 'ioredis';
 import { AccountController } from './accounts/account.controller';
 import { AccountSettingsService } from './accounts/account-settings.service';
+import { AnalyticsController } from './analytics/analytics.controller';
+import { AnalyticsService } from './analytics/analytics.service';
 import { APP_CONFIG, NOTIFIER, OTP_VERIFIER, REDIS } from './app.tokens';
 import { StaffAccess } from './auth/access';
 import { AuthController } from './auth/auth.controller';
@@ -63,6 +65,7 @@ class RedisShutdown implements OnApplicationShutdown {
     ClientsController,
     LocationsController,
     LegalController,
+    AnalyticsController,
     AvailabilityController,
     BookingsController,
     PublicController,
@@ -161,6 +164,7 @@ class RedisShutdown implements OnApplicationShutdown {
       ],
     },
     { provide: ManageTokens, useFactory: (config: AppConfig) => new ManageTokens(config.fieldMasterKey), inject: [APP_CONFIG] },
+    { provide: AnalyticsService, useFactory: (db: DbService) => new AnalyticsService(db), inject: [DbService] },
     {
       provide: LegalService,
       useFactory: (db: DbService, hasher: PhoneHasher) => new LegalService(db, hasher),
