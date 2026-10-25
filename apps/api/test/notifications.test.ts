@@ -17,7 +17,7 @@ import { SandboxChannel, type Channel, type ChannelAdapter, type Contact, type O
 import { NotificationDispatcher, formatWhen } from '../src/notifications/dispatcher';
 import { QueueNotifier } from '../src/notifications/queue';
 import { ManageTokens } from '../src/public/manage-token';
-import { Client, RecordingNotifier, TEST_CONFIG, TEST_OTP, TEST_REDIS_URL, createTestApp, type TestApp } from './helpers/app';
+import { Client, RecordingNotifier, TEST_CONFIG, TEST_OTP, TEST_REDIS_URL, createTestApp, inviteUser, type TestApp } from './helpers/app';
 import { createTestDb, type TestDb } from './helpers/test-db';
 import { slotWithinDay } from './helpers/time';
 
@@ -276,6 +276,34 @@ describe('уведомления (D-035, D-052)', () => {
       ['client', 'skipped', null],
       ['user', 'sent', 'email'],
     ]);
+  });
+
+  test('дни рождения (D-065): владельцу все именинники, сотруднику только свои, ассистенту ничего; повтор не шлёт', async () => {
+    fresh();
+    const izaStaff = (await master.post('/staff', { displayName: 'Iza', publicSlug: 'notify-iza' })).body.id;
+    await inviteUser(t.url, master, { email: 'iza@notify.pl', role: 'staff', staffId: izaStaff }, PASSWORD);
+    await inviteUser(t.url, master, { email: 'desk@notify.pl', role: 'assistant' }, PASSWORD);
+    const iza = new Client(t.url);
+    await iza.post('/auth/login', { email: 'iza@notify.pl', password: PASSWORD });
+    assert.equal((await master.post('/clients', { name: 'Ania', phone: '790 000 001', birthday: '06-15' })).status, 201);
+    assert.equal((await iza.post('/clients', { name: 'Basia', phone: '790 000 002', birthday: '06-15' })).status, 201);
+    assert.equal((await master.post('/clients', { name: 'Celina', phone: '790 000 003', birthday: '06-16' })).status, 201);
+
+    const event = { type: 'account.birthdays', accountId, date: '2030-06-15' } as const;
+    const results = await dispatcher.dispatch(event);
+    assert.deepEqual(results.map((r) => [r.template, r.status, r.channel]), [
+      ['notify.master.birthdays', 'sent', 'email'],
+      ['notify.master.birthdays', 'sent', 'email'],
+    ]);
+    const byRecipient = new Map(email.sent.map((m) => [m.to.email, m.text]));
+    assert.deepEqual([...byRecipient.keys()].sort(), ['iza@notify.pl', 'owner@notify.pl'], 'ассистенту не отправляется');
+    assert.match(byRecipient.get('owner@notify.pl')!, /Ania, Basia/);
+    assert.ok(!byRecipient.get('owner@notify.pl')!.includes('Celina'), 'только сегодняшние');
+    assert.match(byRecipient.get('iza@notify.pl')!, /Basia/);
+    assert.ok(!byRecipient.get('iza@notify.pl')!.includes('Ania'), 'сотруднику только свои клиенты');
+
+    await dispatcher.dispatch(event);
+    assert.equal(email.sent.length, 2, 'повтор события не шлёт второй раз');
   });
 
   test('журнал уведомлений защищён RLS и не удаляется приложением', async () => {

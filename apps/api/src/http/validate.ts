@@ -1,3 +1,4 @@
+import { parseBirthday, type Birthday } from '@rezerwapp/shared';
 import { ValidationError } from '../errors';
 
 /**
@@ -88,6 +89,13 @@ export class Input {
 
   optOneOf<T extends string>(key: string, values: readonly T[]): T | undefined {
     return this.has(key) ? this.oneOf(key, values) : undefined;
+  }
+
+  /** День рождения "MM-DD" без года (D-065); 29 февраля допустимо. */
+  optBirthday(key: string): Birthday | undefined {
+    const value = this.optString(key, { max: 5, pattern: /^\d{2}-\d{2}$/ });
+    if (value === undefined) return undefined;
+    return parseBirthday(value) ?? this.fail(key, 'not a calendar day');
   }
 
   /** Календарная дата YYYY-MM-DD (локальная дата Account, без времени). */

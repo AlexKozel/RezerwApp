@@ -154,7 +154,7 @@ describe('CRM (D-050): карточка, заметки, blacklist, экспор
     const csv = await owner.get('/clients/export?format=csv');
     assert.match(csv.headers.get('content-type') ?? '', /text\/csv/);
     assert.match(csv.headers.get('content-disposition') ?? '', /attachment; filename="clients-\d{4}-\d{2}-\d{2}\.csv"/);
-    assert.ok(csv.body.startsWith('id,name,phone,email,language,createdAt,anonymizedAt\r\n'));
+    assert.ok(csv.body.startsWith('id,name,phone,email,language,birthday,createdAt,anonymizedAt\r\n'));
     assert.deepEqual([...(await owner.bytes('/clients/export?format=csv')).subarray(0, 3)], [0xef, 0xbb, 0xbf], 'UTF-8 BOM для Excel');
     assert.ok(csv.body.includes(PHONE_A));
     assert.ok(csv.body.includes(`"'=HYPERLINK(""http://evil"")"`));

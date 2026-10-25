@@ -1,7 +1,8 @@
 import { randomBytes } from 'node:crypto';
-import { isLocale, type Locale } from '@rezerwapp/shared';
+import { formatBirthdayValue, isLocale, type Birthday, type Locale } from '@rezerwapp/shared';
 import type { PoolClient } from 'pg';
 import { audit } from '../audit';
+import { ForbiddenError } from '../auth/auth.guard';
 import type { FieldCipher } from '../crypto/field-cipher';
 import type { PhoneHasher } from '../crypto/phone-hash';
 import type { Db } from '../db/db';
@@ -11,7 +12,7 @@ import { parseCsv, unescapeFormula } from './csv';
 
 /**
  * Кто смотрит: пользователь и специалисты, к которым он ограничен (null = все, роли owner и assistant).
- * «Свои» клиенты специалиста: те, у кого есть хотя бы одна запись к нему (D-050).
+ * «Свои» клиенты специалиста: с хотя бы одной записью к нему (D-050) или добавленные им вручную (D-065).
  */
 export interface Viewer {
   accountId: string;
@@ -30,6 +31,8 @@ export interface ClientSummary {
 export interface ClientCard extends ClientSummary {
   phone: string | null;
   email: string | null;
+  /** "MM-DD" или null (D-065). */
+  birthday: string | null;
   blacklisted: { reason: string | null; expiresAt: Date } | null;
   stats: { completed: number; noShow: number; cancelledByClient: number };
   bookings: Array<{ id: string; staffId: string; startsAt: Date; status: string }>;
@@ -75,6 +78,41 @@ function mapHeader(cells: string[]): Partial<Record<keyof typeof HEADER_ALIASES,
     }
   });
   return result;
+}
+
+/** Условие видимости клиента c для специалистов из параметра $n (null = все): запись к ним или ручная связь. */
+function visibleTo(n: number): string {
+  const p = `$${n}`;
+  return `(${p}::uuid[] IS NULL
+    OR EXISTS (SELECT 1 FROM bookings b WHERE b.client_id = c.id AND b.staff_id = ANY(${p}))
+    OR EXISTS (SELECT 1 FROM client_staff cs WHERE cs.client_id = c.id AND cs.staff_id = ANY(${p})))`;
+}
+
+function birthdayOf(row: { birth_month: number | null; birth_day: number | null }): string | null {
+  return row.birth_month === null || row.birth_day === null ? null : formatBirthdayValue({ month: row.birth_month, day: row.birth_day });
+}
+
+export interface ClientBirthday {
+  /** Местная дата YYYY-MM-DD, когда отмечается день рождения. */
+  date: string;
+  id: string;
+  name: string;
+}
+
+/**
+ * Именинники за days дней с from среди клиентов, видимых специалистам staffIds (null = всем), в транзакции
+ * withAccount. Общий запрос для календаря мастера и утреннего напоминания (D-065).
+ */
+export async function birthdaysBetween(client: PoolClient, from: string, days: number, staffIds: string[] | null): Promise<ClientBirthday[]> {
+  const rows = await client.query<ClientBirthday>(
+    `SELECT to_char(d.day, 'YYYY-MM-DD') AS date, c.id, c.name
+       FROM generate_series($1::date, $1::date + ($2::int - 1), interval '1 day') AS d(day)
+       JOIN clients c ON c.anonymized_at IS NULL AND birthday_on(c.birth_month, c.birth_day, d.day::date)
+      WHERE ${visibleTo(3)}
+      ORDER BY d.day, lower(c.name)`,
+    [from, days, staffIds],
+  );
+  return rows.rows;
 }
 
 /** Откат транзакции пробного импорта. */
@@ -129,7 +167,7 @@ export class CrmService {
         `SELECT c.id, c.name, c.language, c.created_at, c.anonymized_at FROM clients c
           WHERE ($1::bytea IS NULL OR c.phone_hash = $1)
             AND ($2::text IS NULL OR lower(c.name) LIKE $2)
-            AND ($3::uuid[] IS NULL OR EXISTS (SELECT 1 FROM bookings b WHERE b.client_id = c.id AND b.staff_id = ANY($3)))
+            AND ${visibleTo(3)}
           ORDER BY lower(c.name), c.id
           LIMIT $4 OFFSET $5`,
         [phone?.hash ?? null, namePattern, viewer.staffIds, LIST_LIMIT, query.offset ?? 0],
@@ -138,14 +176,44 @@ export class CrmService {
     });
   }
 
-  /** Клиент, добавленный мастером вручную. Если номер уже есть в базе, возвращается CLIENT_EXISTS с id. */
-  async create(viewer: Viewer, input: { name: string; phone: string; language: Locale; email: string | null }): Promise<{ id: string }> {
+  /**
+   * Клиент, добавленный мастером вручную (D-065). Специалист (staff) становится «его» мастером: клиент виден ему
+   * без записей. Номер уже есть в базе Account:
+   * - клиент виден пользователю: CLIENT_EXISTS с id (открыть карточку, а не создавать дубль);
+   * - сотрудник его не видит (клиент другого мастера салона): клиент привязывается и к нему (linked), карточка
+   *   при этом не меняется; привязка пишется в журнал аудита.
+   */
+  async create(
+    viewer: Viewer,
+    input: { name: string; phone: string; language: Locale; email: string | null; birthday: Birthday | null },
+  ): Promise<{ id: string; linked: boolean }> {
+    // Сотрудник без профиля специалиста не увидел бы созданного клиента.
+    if (viewer.staffIds && viewer.staffIds.length === 0) throw new ForbiddenError();
     return this.db.withAccount(viewer.accountId, async (client) => {
       const ref = await this.clients.findOrCreate(client, viewer.accountId, input);
-      if (!ref.created) throw new ClientExistsError(ref.id);
-      if (input.email) await client.query('UPDATE clients SET email = $2 WHERE id = $1', [ref.id, input.email]);
-      return { id: ref.id };
+      if (!ref.created) {
+        if (!viewer.staffIds || (await this.canSee(client, viewer, ref.id))) throw new ClientExistsError(ref.id);
+        await this.link(client, viewer, ref.id);
+        await audit(client, viewer.accountId, viewer.userId, 'client.link', 'client', ref.id);
+        return { id: ref.id, linked: true };
+      }
+      await client.query('UPDATE clients SET email = $2, birth_month = $3, birth_day = $4 WHERE id = $1', [
+        ref.id,
+        input.email,
+        input.birthday?.month ?? null,
+        input.birthday?.day ?? null,
+      ]);
+      if (viewer.staffIds) await this.link(client, viewer, ref.id);
+      return { id: ref.id, linked: false };
     });
+  }
+
+  /**
+   * Именинники за days дней начиная с from (местные даты), среди видимых пользователю клиентов.
+   * 29 февраля в невисокосный год попадает на 28 февраля (birthday_on, миграция 0014).
+   */
+  async birthdays(viewer: Viewer, from: string, days: number): Promise<ClientBirthday[]> {
+    return this.db.withAccount(viewer.accountId, (client) => birthdaysBetween(client, from, days, viewer.staffIds));
   }
 
   async card(viewer: Viewer, clientId: string): Promise<ClientCard> {
@@ -177,6 +245,7 @@ export class CrmService {
         anonymized: row.anonymized_at !== null,
         phone,
         email: row.email,
+        birthday: birthdayOf(row),
         blacklisted: blacklist ? { reason: blacklist.reason, expiresAt: blacklist.expires_at } : null,
         stats: { completed: count('completed'), noShow: count('no_show'), cancelledByClient: count('cancelled_by_client') },
         bookings: bookings.rows.map((b) => ({ id: b.id, staffId: b.staff_id, startsAt: b.starts_at, status: b.status })),
@@ -185,14 +254,30 @@ export class CrmService {
     });
   }
 
-  async update(viewer: Viewer, clientId: string, patch: { name?: string; email?: string | null; language?: Locale }): Promise<void> {
+  /** undefined: поле не меняется; null у email и birthday: стереть. */
+  async update(
+    viewer: Viewer,
+    clientId: string,
+    patch: { name?: string; email?: string | null; language?: Locale; birthday?: Birthday | null },
+  ): Promise<void> {
     await this.db.withAccount(viewer.accountId, async (client) => {
       const row = await this.visible(client, viewer, clientId);
       if (row.anonymized_at) throw new ConflictError('CLIENT_ANONYMIZED', 'Client data was erased');
       await client.query(
-        `UPDATE clients SET name = COALESCE($2, name), email = CASE WHEN $3 THEN $4 ELSE email END, language = COALESCE($5, language)
+        `UPDATE clients SET name = COALESCE($2, name), email = CASE WHEN $3 THEN $4 ELSE email END, language = COALESCE($5, language),
+                            birth_month = CASE WHEN $6 THEN $7::smallint ELSE birth_month END,
+                            birth_day = CASE WHEN $6 THEN $8::smallint ELSE birth_day END
           WHERE id = $1`,
-        [clientId, patch.name ?? null, patch.email !== undefined, patch.email ?? null, patch.language ?? null],
+        [
+          clientId,
+          patch.name ?? null,
+          patch.email !== undefined,
+          patch.email ?? null,
+          patch.language ?? null,
+          patch.birthday !== undefined,
+          patch.birthday?.month ?? null,
+          patch.birthday?.day ?? null,
+        ],
       );
     });
   }
@@ -360,9 +445,11 @@ export class CrmService {
         phone_encrypted: Buffer;
         email: string | null;
         language: string;
+        birth_month: number | null;
+        birth_day: number | null;
         created_at: Date;
         anonymized_at: Date | null;
-      }>('SELECT id, name, phone_encrypted, email, language, created_at, anonymized_at FROM clients ORDER BY created_at');
+      }>('SELECT id, name, phone_encrypted, email, language, birth_month, birth_day, created_at, anonymized_at FROM clients ORDER BY created_at');
       const rows = [];
       for (const c of clients.rows) {
         rows.push({
@@ -371,6 +458,7 @@ export class CrmService {
           phone: c.anonymized_at ? null : await this.cipher.decrypt(client, viewer.accountId, c.phone_encrypted),
           email: c.email,
           language: c.language,
+          birthday: birthdayOf(c),
           createdAt: c.created_at,
           anonymizedAt: c.anonymized_at,
         });
@@ -401,7 +489,8 @@ export class CrmService {
       await client.query('DELETE FROM client_notes WHERE client_id = $1', [clientId]);
       await client.query('DELETE FROM blacklist_entries WHERE phone_hash = $1', [row.phone_hash]);
       await client.query(
-        `UPDATE clients SET name = '—', email = NULL, phone_encrypted = '\\x'::bytea, phone_hash = $2, anonymized_at = now()
+        `UPDATE clients SET name = '—', email = NULL, phone_encrypted = '\\x'::bytea, phone_hash = $2, birth_month = NULL, birth_day = NULL,
+                            anonymized_at = now()
           WHERE id = $1`,
         [clientId, randomBytes(32)],
       );
@@ -430,17 +519,34 @@ export class CrmService {
       email: string | null;
       phone_encrypted: Buffer;
       phone_hash: Buffer;
+      birth_month: number | null;
+      birth_day: number | null;
       created_at: Date;
       anonymized_at: Date | null;
     }>(
       `SELECT c.* FROM clients c
-        WHERE c.id = $1
-          AND ($2::uuid[] IS NULL OR EXISTS (SELECT 1 FROM bookings b WHERE b.client_id = c.id AND b.staff_id = ANY($2)))
+        WHERE c.id = $1 AND ${visibleTo(2)}
         FOR UPDATE OF c`,
       [clientId, viewer.staffIds],
     )).rows[0];
     if (!row) throw new NotFoundError('client');
     return row;
+  }
+
+  private async canSee(client: PoolClient, viewer: Viewer, clientId: string): Promise<boolean> {
+    const row = await client.query(`SELECT 1 FROM clients c WHERE c.id = $1 AND ${visibleTo(2)}`, [clientId, viewer.staffIds]);
+    return (row.rowCount ?? 0) > 0;
+  }
+
+  /** Ручная связь клиента со специалистами сотрудника (D-065). */
+  private async link(client: PoolClient, viewer: Viewer, clientId: string): Promise<void> {
+    for (const staffId of viewer.staffIds ?? []) {
+      await client.query('INSERT INTO client_staff (account_id, client_id, staff_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [
+        viewer.accountId,
+        clientId,
+        staffId,
+      ]);
+    }
   }
 }
 

@@ -4,6 +4,8 @@ import type { PoolClient } from 'pg';
 export type AuditAction =
   | 'client.read'
   | 'client.anonymize'
+  // Сотрудник привязал к себе клиента другого мастера, внеся его номер (D-065).
+  | 'client.link'
   | 'notes.read'
   | 'notes.write'
   | 'notes.delete'

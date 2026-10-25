@@ -125,6 +125,12 @@ async function seed(db: Db, migrator: Pool): Promise<void> {
 
   const tz = 'Europe/Warsaw';
   const today = localDate(new Date(), tz);
+  // Дни рождения (D-065): у Zofia сегодня (видно напоминание в календаре), у Marta через 3 дня.
+  for (const [index, date] of [[0, today], [2, addDays(today, 3)]] as const) {
+    await db.withAccount(accountId, (c) =>
+      c.query('UPDATE clients SET birth_month = $2, birth_day = $3 WHERE id = $1', [ids[index], Number(date.slice(5, 7)), Number(date.slice(8, 10))]),
+    );
+  }
   const at = (day: string, hour: number) => zonedToUtc(day, hour * 60, tz)!;
   const book = (staffId: string, service: typeof manicure, clientIndex: number, startsAt: Date, approval = false) =>
     bookings.create({

@@ -10,7 +10,9 @@ export type BookingNotification =
   | { type: 'booking.client_reminder'; accountId: string; bookingId: string }
   | { type: 'booking.cancelled_by_client'; accountId: string; bookingId: string; late: boolean }
   | { type: 'booking.rescheduled'; accountId: string; bookingId: string; fromBookingId: string }
-  | { type: 'account.sms_quota'; accountId: string; month: string; percent: number };
+  | { type: 'account.sms_quota'; accountId: string; month: string; percent: number }
+  /** Утреннее напоминание мастерам о днях рождения клиентов (D-065), date: местная дата Account. */
+  | { type: 'account.birthdays'; accountId: string; date: string };
 
 /** Ключ события: одно и то же событие доставляется получателю один раз (notification_log, очередь). */
 export function dedupeKey(event: BookingNotification): string {
@@ -19,6 +21,8 @@ export function dedupeKey(event: BookingNotification): string {
       return `${event.type}:${event.bookingId}:${event.to}`;
     case 'account.sms_quota':
       return `${event.type}:${event.month}`;
+    case 'account.birthdays':
+      return `${event.type}:${event.date}`;
     default:
       return `${event.type}:${event.bookingId}`;
   }

@@ -4,6 +4,7 @@ import type { PoolClient } from 'pg';
 import type { FieldCipher } from '../crypto/field-cipher';
 import type { Db } from '../db/db';
 import { dedupeKey, notifySafely, type BookingNotification, type Notifier } from '../jobs/notifier';
+import { birthdaysBetween } from '../clients/crm.service';
 import type { ManageTokens } from '../public/manage-token';
 import { CHANNEL_ORDER, type Channel, type ChannelAdapter, type Contact } from './channels';
 import { SMS_WARN_PERCENT, chargeSms, smsUsage } from './sms-quota';
@@ -113,6 +114,8 @@ export class NotificationDispatcher {
         subjectMaster: account.name,
       }));
     }
+
+    if (event.type === 'account.birthdays') return this.birthdayReminders(client, event.date);
 
     const b = await this.booking(client, event.bookingId);
     if (!b) return [];
@@ -277,6 +280,37 @@ export class NotificationDispatcher {
       if (linked.rows.length > 0) return linked.rows;
     }
     return this.owners(client);
+  }
+
+  /**
+   * Именинники дня каждому мастеру: владельцам все клиенты Account, сотрудникам (staff) только свои (D-050, D-065).
+   * assistant не получает: поздравлять клиента будет мастер. Кому некого поздравить, тому не отправляется.
+   */
+  private async birthdayReminders(client: PoolClient, date: string): Promise<Delivery[]> {
+    const account = (await client.query<{ name: string; locale: string }>('SELECT name, locale FROM accounts')).rows[0];
+    if (!account) return [];
+    const users = await client.query<{ id: string; email: string; role: string; staff_ids: string[] }>(
+      `SELECT u.id, u.email, u.role, COALESCE(array_agg(st.id) FILTER (WHERE st.id IS NOT NULL), '{}') AS staff_ids
+         FROM users u LEFT JOIN staff st ON st.user_id = u.id
+        WHERE u.role IN ('owner', 'staff')
+        GROUP BY u.id ORDER BY u.created_at`,
+    );
+    const deliveries: Delivery[] = [];
+    for (const u of users.rows) {
+      if (u.role === 'staff' && u.staff_ids.length === 0) continue;
+      const people = await birthdaysBetween(client, date, 1, u.role === 'owner' ? null : u.staff_ids);
+      if (people.length === 0) continue;
+      deliveries.push({
+        kind: 'user',
+        id: u.id,
+        language: lang(account.locale),
+        template: 'notify.master.birthdays',
+        params: { names: people.map((p) => p.name).join(', ') },
+        contact: { email: u.email, phone: null },
+        subjectMaster: account.name,
+      });
+    }
+    return deliveries;
   }
 
   private async owners(client: PoolClient): Promise<Array<{ id: string; email: string }>> {

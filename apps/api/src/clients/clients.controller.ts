@@ -11,8 +11,8 @@ import { BLACKLIST_DEFAULT_DAYS, CrmService, toCsv, type Viewer } from './crm.se
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
- * CRM (D-050). owner и assistant видят всю базу Account, staff только своих клиентов (с записями к нему).
- * Заметки и blacklist: owner и staff; экспорт, анонимизация и журнал аудита: только owner.
+ * CRM (D-050, D-065). owner и assistant видят всю базу Account, staff только своих клиентов (с записями к нему
+ * или добавленных им вручную). Заметки и blacklist: owner и staff; экспорт, анонимизация и журнал аудита: только owner.
  */
 @Controller()
 @UseGuards(SessionGuard)
@@ -43,9 +43,20 @@ export class ClientsController {
       phone: input.string('phone', { max: 30 }),
       language: input.optOneOf('language', LOCALES) ?? 'pl',
       email: input.optString('email', { max: 254, pattern: EMAIL_RE }) ?? null,
+      birthday: input.optBirthday('birthday') ?? null,
     };
     input.done();
     return this.crm.create(await this.viewer(s), client);
+  }
+
+  /** Именинники среди своих клиентов: ?from=YYYY-MM-DD (местная дата Account) &days=1..31 (по умолчанию 1). */
+  @Get('clients/birthdays')
+  async birthdays(@CurrentSession() s: Session, @Query() query: unknown) {
+    const input = new Input(query);
+    const from = input.date('from');
+    const days = input.optInt('days', { min: 1, max: 31 }) ?? 1;
+    input.done();
+    return this.crm.birthdays(await this.viewer(s), from, days);
   }
 
   /** Экспорт базы (D-022). ?format=csv отдаёт CSV клиентов, иначе JSON с клиентами, записями и согласиями. */
@@ -64,7 +75,7 @@ export class ClientsController {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="clients-${stamp}.csv"`);
     // BOM: Excel иначе открывает UTF-8 (польские и кириллические имена) в неверной кодировке.
-    return '﻿' + toCsv(data.clients, ['id', 'name', 'phone', 'email', 'language', 'createdAt', 'anonymizedAt']);
+    return '﻿' + toCsv(data.clients, ['id', 'name', 'phone', 'email', 'language', 'birthday', 'createdAt', 'anonymizedAt']);
   }
 
   /**
@@ -96,6 +107,7 @@ export class ClientsController {
       name: input.optString('name', { max: 100 }),
       email: raw.email === null ? null : input.optString('email', { max: 254, pattern: EMAIL_RE }),
       language: input.optOneOf('language', LOCALES),
+      birthday: raw.birthday === null ? null : input.optBirthday('birthday'),
     };
     input.done();
     await this.crm.update(await this.viewer(s), id, patch);

@@ -13,11 +13,12 @@ export interface MaintenanceResult {
   reminded: number;
   clientReminded: number;
   blacklistPurged: number;
+  birthdays: number;
 }
 
 /**
  * Периодическое обслуживание (D-017, D-024, D-049): истечение hold, напоминание мастеру, напоминание клиенту
- * за 24 часа, очистка blacklist.
+ * за 24 часа, очистка blacklist, утреннее напоминание о днях рождения клиентов (D-065).
  * Account с заявками pending находит функция jobs_accounts_with_pending (миграция 0006), дальше каждый
  * Account обрабатывается под своим RLS. Сбой в одном Account не останавливает остальные.
  */
@@ -33,7 +34,7 @@ export class MaintenanceJobs {
 
   async run(): Promise<MaintenanceResult> {
     const accounts = (await this.db.pool.query<{ id: string }>('SELECT id FROM jobs_accounts_with_pending() AS id')).rows;
-    const result: MaintenanceResult = { accounts: accounts.length, expired: 0, reminded: 0, clientReminded: 0, blacklistPurged: 0 };
+    const result: MaintenanceResult = { accounts: accounts.length, expired: 0, reminded: 0, clientReminded: 0, blacklistPurged: 0, birthdays: 0 };
 
     // D-024: записи blacklist с истёкшим сроком удаляются, а не только перестают действовать.
     const withExpired = (await this.db.pool.query<{ id: string }>('SELECT id FROM jobs_accounts_with_expired_blacklist() AS id')).rows;
@@ -69,6 +70,13 @@ export class MaintenanceJobs {
       } catch (error) {
         this.logger.error(`account ${accountId}: client reminders: ${(error as Error).message}`);
       }
+    }
+
+    // Дни рождения: с 09:00 по поясу Account, один раз в день (отметка в notification_log, миграция 0014).
+    const birthdays = (await this.db.pool.query<{ account_id: string; day: string }>('SELECT account_id, day FROM jobs_accounts_with_birthdays()')).rows;
+    for (const row of birthdays) {
+      result.birthdays += 1;
+      await this.send({ type: 'account.birthdays', accountId: row.account_id, date: row.day });
     }
     return result;
   }
