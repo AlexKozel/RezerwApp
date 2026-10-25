@@ -48,8 +48,10 @@ export class JobScheduler implements OnApplicationBootstrap, OnApplicationShutdo
       concurrency: 1,
     });
     this.worker.on('failed', (_job, error) => this.logger.error(`maintenance failed: ${error.message}`));
-    this.worker.on('completed', (_job, result: { expired: number; reminded: number }) => {
-      if (result.expired + result.reminded > 0) this.logger.log(`expired=${result.expired} reminded=${result.reminded}`);
+    this.worker.on('completed', (_job, r: { expired: number; reminded: number; blacklistPurged: number }) => {
+      if (r.expired + r.reminded + r.blacklistPurged > 0) {
+        this.logger.log(`expired=${r.expired} reminded=${r.reminded} blacklistPurged=${r.blacklistPurged}`);
+      }
     });
   }
 

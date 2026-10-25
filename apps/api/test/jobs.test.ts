@@ -3,6 +3,11 @@ import { randomBytes } from 'node:crypto';
 import { after, before, describe, test } from 'node:test';
 import { Redis } from 'ioredis';
 import { BookingsService } from '../src/bookings/bookings.service';
+import { ClientsService } from '../src/clients/clients.service';
+import { CrmService } from '../src/clients/crm.service';
+import { FieldCipher } from '../src/crypto/field-cipher';
+import { EnvKeyProvider } from '../src/crypto/key-provider';
+import { PhoneHasher } from '../src/crypto/phone-hash';
 import { MASTER_REMINDER_AFTER_MIN, MaintenanceJobs } from '../src/jobs/maintenance';
 import type { BookingNotification, Notifier } from '../src/jobs/notifier';
 import { JobScheduler } from '../src/jobs/scheduler';
@@ -21,10 +26,14 @@ const T = (hhmm: string, day = '2030-05-06'): Date => new Date(`${day}T${hhmm}:0
 describe('фоновые задачи (D-017, D-049)', () => {
   let db: TestDb;
   let bookings: BookingsService;
+  let crm: CrmService;
 
   before(async () => {
     db = await createTestDb('jobs');
     bookings = new BookingsService(db.app);
+    const hasher = new PhoneHasher('test-pepper');
+    const cipher = new FieldCipher(new EnvKeyProvider(Buffer.alloc(32, 7)));
+    crm = new CrmService(db.app, new ClientsService(hasher, cipher), hasher, cipher);
   });
   after(async () => {
     await db.close();
@@ -49,7 +58,7 @@ describe('фоновые задачи (D-017, D-049)', () => {
     await age(freshA.id, MASTER_REMINDER_AFTER_MIN - 5);
 
     const notifier = new RecordingNotifier();
-    const jobs = new MaintenanceJobs(db.app, bookings, notifier);
+    const jobs = new MaintenanceJobs(db.app, bookings, crm, notifier);
     const first = await jobs.run();
     assert.ok(first.accounts >= 2);
     assert.equal(first.expired, 2);
@@ -77,8 +86,8 @@ describe('фоновые задачи (D-017, D-049)', () => {
     for (const b of ids) await age(b.id, 45);
     const notifier = new RecordingNotifier();
     const [x, y] = await Promise.all([
-      new MaintenanceJobs(db.app, bookings, notifier).run(),
-      new MaintenanceJobs(db.app, bookings, notifier).run(),
+      new MaintenanceJobs(db.app, bookings, crm, notifier).run(),
+      new MaintenanceJobs(db.app, bookings, crm, notifier).run(),
     ]);
     assert.equal(x.reminded + y.reminded, 4);
     const reminded = notifier.events.filter((e) => e.type === 'booking.master_reminder').map((e) => e.bookingId);
@@ -92,9 +101,21 @@ describe('фоновые задачи (D-017, D-049)', () => {
     const b = await pending(s, T('09:00', '2030-05-08'));
     await expire(b.id);
     const failing: Notifier = { notify: async () => Promise.reject(new Error('channel down')) };
-    const result = await new MaintenanceJobs(db.app, bookings, failing).run();
+    const result = await new MaintenanceJobs(db.app, bookings, crm, failing).run();
     assert.ok(result.expired >= 1);
     assert.equal(await status(b.id), 'expired');
+  });
+
+  test('записи blacklist с истёкшим сроком удаляются (D-024), действующие остаются', async () => {
+    const s = await seedAccount(db.admin);
+    await db.admin.query(
+      "INSERT INTO blacklist_entries (account_id, phone_hash, expires_at) VALUES ($1, '\\xaa', now() - interval '1 day'), ($1, '\\xbb', now() + interval '1 day')",
+      [s.accountId],
+    );
+    const result = await new MaintenanceJobs(db.app, bookings, crm, new RecordingNotifier()).run();
+    assert.ok(result.blacklistPurged >= 1);
+    const left = await db.admin.query("SELECT encode(phone_hash, 'hex') AS h FROM blacklist_entries WHERE account_id = $1", [s.accountId]);
+    assert.deepEqual(left.rows, [{ h: 'bb' }]);
   });
 
   test('функция поиска Account возвращает только id и недоступна PUBLIC', async () => {
@@ -113,7 +134,7 @@ describe('фоновые задачи (D-017, D-049)', () => {
     const b = await pending(s, T('09:00', '2030-05-09'));
     await expire(b.id);
     const prefix = `test-bull-${randomBytes(4).toString('hex')}`;
-    const scheduler = new JobScheduler(new MaintenanceJobs(db.app, bookings, new RecordingNotifier()), {
+    const scheduler = new JobScheduler(new MaintenanceJobs(db.app, bookings, crm, new RecordingNotifier()), {
       redisUrl: TEST_REDIS_URL,
       prefix,
       everyMs: 200,

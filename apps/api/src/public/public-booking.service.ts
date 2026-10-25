@@ -12,6 +12,8 @@ import { AppError, ConflictError, NotFoundError, ValidationError } from '../erro
 import type { RateLimiter } from '../rate-limit';
 import type { OtpVerifier } from './otp';
 
+type ConsentType = 'terms' | 'privacy' | 'health';
+
 /** D-044: одновременных заявок pending с одного номера у одного специалиста. */
 export const MAX_PENDING_PER_PHONE = 2;
 
@@ -30,6 +32,8 @@ export interface PublicBookingInput {
   otpCode: string;
   acceptTerms: boolean;
   acceptPrivacy: boolean;
+  /** Необязательное согласие на обработку данных о здоровье (L-23). */
+  acceptHealth?: boolean;
   ip: string;
   now?: Date;
 }
@@ -124,7 +128,7 @@ export class PublicBookingService {
       if (!(await this.availability.isOffered(client, ctx, input.startsAt, now))) {
         throw new ConflictError('SLOT_NOT_AVAILABLE', 'This time is not offered');
       }
-      const documents = await this.legalVersions(client, input.language);
+      const documents = await this.legalVersions(client, input.language, input.acceptHealth ?? false);
 
       const person = await this.clients.findOrCreate(client, accountId, { phone, name: input.name, language: input.language });
       // Блокировка карточки клиента сериализует его параллельные заявки, иначе лимит D-044 обходится гонкой.
@@ -191,15 +195,19 @@ export class PublicBookingService {
     return row;
   }
 
-  /** Актуальные версии Regulamin и политики конфиденциальности на языке клиента (иначе польская, D-036). */
-  private async legalVersions(client: PoolClient, language: Locale): Promise<Array<['terms' | 'privacy', string]>> {
-    const rows = await client.query<{ type: 'terms' | 'privacy'; version: string }>(
+  /**
+   * Актуальные версии принятых клиентом текстов на его языке (иначе польская, D-036): Regulamin и политика
+   * всегда, согласие на данные о здоровье только если клиент его отметил (L-23, чекбокс не отмечен по умолчанию).
+   */
+  private async legalVersions(client: PoolClient, language: Locale, withHealth: boolean): Promise<Array<[ConsentType, string]>> {
+    const types: ConsentType[] = withHealth ? ['terms', 'privacy', 'health'] : ['terms', 'privacy'];
+    const rows = await client.query<{ type: ConsentType; version: string }>(
       `SELECT DISTINCT ON (type) type, version FROM consent_documents
-        WHERE type IN ('terms', 'privacy') AND language IN ($1, 'pl') AND valid_from <= now()
+        WHERE type = ANY($2) AND language IN ($1, 'pl') AND valid_from <= now()
         ORDER BY type, (language = $1) DESC, valid_from DESC`,
-      [language],
+      [language, types],
     );
-    if (rows.rows.length < 2) throw new AppError('LEGAL_TEXTS_MISSING', 'Terms or privacy policy are not published');
+    if (rows.rows.length < types.length) throw new AppError('LEGAL_TEXTS_MISSING', 'A required legal text is not published');
     return rows.rows.map((r) => [r.type, r.version]);
   }
 

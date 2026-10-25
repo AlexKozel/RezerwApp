@@ -36,7 +36,7 @@ export class AppErrorFilter extends BaseExceptionFilter {
     if (exception instanceof AppError) {
       if (exception instanceof TooManyRequestsError) res.setHeader('Retry-After', String(exception.retryAfterSec));
       const code = exception.code === 'CLIENT_BLOCKED' ? 'NO_FREE_SLOTS' : exception.code;
-      const body: Record<string, unknown> = { error: code };
+      const body: Record<string, unknown> = { ...exception.meta, error: code };
       if (exception instanceof ValidationError) body.details = exception.details;
       res.status(STATUS[exception.code] ?? 409).json(body);
       return;

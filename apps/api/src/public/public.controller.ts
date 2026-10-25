@@ -53,6 +53,7 @@ export class PublicController {
       otpCode: input.string('otpCode', { max: 8 }),
       acceptTerms: input.bool('acceptTerms'),
       acceptPrivacy: input.bool('acceptPrivacy'),
+      acceptHealth: input.optBool('acceptHealth') ?? false,
       ip,
     };
     input.done();

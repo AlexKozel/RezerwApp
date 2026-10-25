@@ -16,7 +16,9 @@ import { BookingsController } from './bookings/bookings.controller';
 import { BookingsService } from './bookings/bookings.service';
 import { CatalogController } from './catalog/catalog.controller';
 import { CatalogService } from './catalog/catalog.service';
+import { ClientsController } from './clients/clients.controller';
 import { ClientsService } from './clients/clients.service';
+import { CrmService } from './clients/crm.service';
 import { loadConfig, type AppConfig } from './config';
 import { FieldCipher } from './crypto/field-cipher';
 import { EnvKeyProvider } from './crypto/key-provider';
@@ -49,6 +51,7 @@ class RedisShutdown implements OnApplicationShutdown {
     AuthController,
     AccountController,
     CatalogController,
+    ClientsController,
     AvailabilityController,
     BookingsController,
     PublicController,
@@ -78,9 +81,14 @@ class RedisShutdown implements OnApplicationShutdown {
     { provide: StaffAccess, useFactory: (db: DbService) => new StaffAccess(db), inject: [DbService] },
     { provide: NOTIFIER, useFactory: () => new LogNotifier() },
     {
+      provide: CrmService,
+      useFactory: (db: DbService, clients: ClientsService, hasher: PhoneHasher, cipher: FieldCipher) => new CrmService(db, clients, hasher, cipher),
+      inject: [DbService, ClientsService, PhoneHasher, FieldCipher],
+    },
+    {
       provide: MaintenanceJobs,
-      useFactory: (db: DbService, bookings: BookingsService, notifier: Notifier) => new MaintenanceJobs(db, bookings, notifier),
-      inject: [DbService, BookingsService, NOTIFIER],
+      useFactory: (db: DbService, bookings: BookingsService, crm: CrmService, notifier: Notifier) => new MaintenanceJobs(db, bookings, crm, notifier),
+      inject: [DbService, BookingsService, CrmService, NOTIFIER],
     },
     {
       // При WORKERS=false фоновые задачи выполняет другой процесс; здесь планировщика нет.

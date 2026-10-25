@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import type { BookingsService } from '../bookings/bookings.service';
+import type { CrmService } from '../clients/crm.service';
 import type { Db } from '../db/db';
 import type { Notifier } from './notifier';
 
@@ -10,10 +11,11 @@ export interface MaintenanceResult {
   accounts: number;
   expired: number;
   reminded: number;
+  blacklistPurged: number;
 }
 
 /**
- * Периодическое обслуживание записей (D-017, D-049): истечение hold и напоминание мастеру.
+ * Периодическое обслуживание (D-017, D-024, D-049): истечение hold, напоминание мастеру, очистка blacklist.
  * Account с заявками pending находит функция jobs_accounts_with_pending (миграция 0006), дальше каждый
  * Account обрабатывается под своим RLS. Сбой в одном Account не останавливает остальные.
  */
@@ -23,12 +25,23 @@ export class MaintenanceJobs {
   constructor(
     private readonly db: Db,
     private readonly bookings: BookingsService,
+    private readonly crm: CrmService,
     private readonly notifier: Notifier,
   ) {}
 
   async run(): Promise<MaintenanceResult> {
     const accounts = (await this.db.pool.query<{ id: string }>('SELECT id FROM jobs_accounts_with_pending() AS id')).rows;
-    const result: MaintenanceResult = { accounts: accounts.length, expired: 0, reminded: 0 };
+    const result: MaintenanceResult = { accounts: accounts.length, expired: 0, reminded: 0, blacklistPurged: 0 };
+
+    // D-024: записи blacklist с истёкшим сроком удаляются, а не только перестают действовать.
+    const withExpired = (await this.db.pool.query<{ id: string }>('SELECT id FROM jobs_accounts_with_expired_blacklist() AS id')).rows;
+    for (const { id: accountId } of withExpired) {
+      try {
+        result.blacklistPurged += await this.crm.purgeExpiredBlacklist(accountId);
+      } catch (error) {
+        this.logger.error(`account ${accountId}: blacklist purge: ${(error as Error).message}`);
+      }
+    }
 
     for (const { id: accountId } of accounts) {
       try {
