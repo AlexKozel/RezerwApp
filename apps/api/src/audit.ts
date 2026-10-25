@@ -9,7 +9,8 @@ export type AuditAction =
   | 'notes.delete'
   | 'blacklist.add'
   | 'blacklist.remove'
-  | 'clients.export';
+  | 'clients.export'
+  | 'clients.import';
 
 /**
  * Запись в audit_log (только добавление, D-038) в той же транзакции, что и само действие:

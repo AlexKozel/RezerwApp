@@ -1,12 +1,13 @@
 import { randomBytes } from 'node:crypto';
-import type { Locale } from '@rezerwapp/shared';
+import { isLocale, type Locale } from '@rezerwapp/shared';
 import type { PoolClient } from 'pg';
 import { audit } from '../audit';
 import type { FieldCipher } from '../crypto/field-cipher';
 import type { PhoneHasher } from '../crypto/phone-hash';
 import type { Db } from '../db/db';
-import { AppError, ConflictError, NotFoundError } from '../errors';
+import { AppError, ConflictError, NotFoundError, ValidationError } from '../errors';
 import type { ClientsService } from './clients.service';
+import { parseCsv, unescapeFormula } from './csv';
 
 /**
  * Кто смотрит: пользователь и специалисты, к которым он ограничен (null = все, роли owner и assistant).
@@ -41,6 +42,43 @@ export interface Note {
   sensitivity: 'normal' | 'health';
   createdAt: Date;
 }
+
+export interface ImportReport {
+  dryRun: boolean;
+  total: number;
+  created: number;
+  existing: number;
+  duplicates: number;
+  invalid: number;
+  /** Первые IMPORT_MAX_ERRORS ошибок: номер строки файла и поле. */
+  errors: Array<{ line: number; reason: string }>;
+}
+
+export const IMPORT_MAX_ROWS = 5000;
+const IMPORT_MAX_ERRORS = 100;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Заголовки колонок на языках продукта (D-036), без учёта регистра. Лишние колонки игнорируются. */
+const HEADER_ALIASES: Record<'name' | 'phone' | 'email' | 'language', string[]> = {
+  name: ['name', 'imie', 'imię', 'imie i nazwisko', 'imię i nazwisko', 'klient', 'client', 'имя', 'клиент', 'фио', 'ім’я', "ім'я", 'клієнт'],
+  phone: ['phone', 'telefon', 'tel', 'tel.', 'numer', 'mobile', 'телефон', 'тел'],
+  email: ['email', 'e-mail', 'mail', 'почта', 'пошта'],
+  language: ['language', 'język', 'jezyk', 'lang', 'язык', 'мова'],
+};
+
+function mapHeader(cells: string[]): Partial<Record<keyof typeof HEADER_ALIASES, number>> {
+  const result: Partial<Record<keyof typeof HEADER_ALIASES, number>> = {};
+  cells.forEach((raw, i) => {
+    const h = raw.trim().toLowerCase();
+    for (const [field, aliases] of Object.entries(HEADER_ALIASES) as Array<[keyof typeof HEADER_ALIASES, string[]]>) {
+      if (result[field] === undefined && aliases.includes(h)) result[field] = i;
+    }
+  });
+  return result;
+}
+
+/** Откат транзакции пробного импорта. */
+class DryRunRollback extends Error {}
 
 /** D-024: срок хранения записи blacklist по умолчанию. */
 export const BLACKLIST_DEFAULT_DAYS = 730;
@@ -238,6 +276,77 @@ export class CrmService {
       const deleted = await client.query('DELETE FROM blacklist_entries WHERE expires_at <= now()');
       return deleted.rowCount ?? 0;
     });
+  }
+
+  // --- Импорт (D-054) ---
+
+  /**
+   * Импорт клиентов из CSV одной транзакцией. Строки с ошибками пропускаются и перечисляются в отчёте с номером
+   * строки файла; клиенты с уже известным номером не меняются (existing), повторы номера внутри файла
+   * учитываются один раз (duplicates). dryRun выполняет тот же путь и откатывает транзакцию: отчёт совпадает
+   * с тем, что даст настоящий импорт, а в базе (включая ключ шифрования) ничего не остаётся.
+   */
+  async importCsv(viewer: Viewer, csv: string, dryRun: boolean): Promise<ImportReport> {
+    const { rows } = parseCsv(csv);
+    const [header, ...data] = rows;
+    if (!header) throw new ValidationError({ csv: 'file is empty' });
+    const columns = mapHeader(header.cells);
+    if (columns.name === undefined || columns.phone === undefined) {
+      throw new ValidationError({ csv: 'header must contain name and phone columns' });
+    }
+    if (data.length > IMPORT_MAX_ROWS) throw new ValidationError({ csv: `at most ${IMPORT_MAX_ROWS} rows` });
+
+    const report: ImportReport = { dryRun, total: data.length, created: 0, existing: 0, duplicates: 0, invalid: 0, errors: [] };
+    const fail = (line: number, reason: string) => {
+      report.invalid += 1;
+      if (report.errors.length < IMPORT_MAX_ERRORS) report.errors.push({ line, reason });
+    };
+
+    try {
+      await this.db.withAccount(viewer.accountId, async (client) => {
+        const seen = new Set<string>();
+        for (const row of data) {
+          const cell = (i: number | undefined) => (i === undefined ? '' : unescapeFormula((row.cells[i] ?? '').trim()));
+          const name = cell(columns.name);
+          const phone = this.hasher.hashInput(cell(columns.phone));
+          const email = cell(columns.email);
+          const language = cell(columns.language).toLowerCase();
+          if (name === '' || name.length > 100) {
+            fail(row.line, 'name');
+            continue;
+          }
+          if (!phone) {
+            fail(row.line, 'phone');
+            continue;
+          }
+          if (email !== '' && (!EMAIL_RE.test(email) || email.length > 254)) {
+            fail(row.line, 'email');
+            continue;
+          }
+          if (seen.has(phone.e164)) {
+            report.duplicates += 1;
+            continue;
+          }
+          seen.add(phone.e164);
+          const ref = await this.clients.findOrCreate(client, viewer.accountId, {
+            name,
+            phone: phone.e164,
+            language: isLocale(language) ? language : 'pl',
+          });
+          if (!ref.created) {
+            report.existing += 1;
+            continue;
+          }
+          report.created += 1;
+          if (email !== '') await client.query('UPDATE clients SET email = $2 WHERE id = $1', [ref.id, email]);
+        }
+        if (dryRun) throw new DryRunRollback();
+        await audit(client, viewer.accountId, viewer.userId, 'clients.import');
+      });
+    } catch (error) {
+      if (!(error instanceof DryRunRollback)) throw error;
+    }
+    return report;
   }
 
   // --- Экспорт и удаление (D-022, DATA_MODEL.md, разделы 5-6) ---
