@@ -1,5 +1,5 @@
 import { DEFAULT_LOCALE, isLocale, t as translate, type Locale, type MessageKey, type MessageParams } from '@rezerwapp/shared';
-import { createContext, useContext, type ReactNode } from 'react';
+import { createContext, useContext, useMemo, type ReactNode } from 'react';
 
 const STORAGE_KEY = 'rezerwapp.lang';
 
@@ -24,14 +24,23 @@ export function saveLocale(locale: Locale): void {
   }
 }
 
-const LocaleContext = createContext<Locale>(DEFAULT_LOCALE);
-
-export function LocaleProvider({ locale, children }: { locale: Locale; children: ReactNode }) {
-  return <LocaleContext.Provider value={locale}>{children}</LocaleContext.Provider>;
+interface LocaleValue {
+  locale: Locale;
+  t: (key: MessageKey, params?: MessageParams) => string;
 }
 
-/** t() текущего языка интерфейса. */
-export function useT(): { locale: Locale; t: (key: MessageKey, params?: MessageParams) => string } {
-  const locale = useContext(LocaleContext);
-  return { locale, t: (key, params) => translate(locale, key, params) };
+const LocaleContext = createContext<LocaleValue>({ locale: DEFAULT_LOCALE, t: (key, params) => translate(DEFAULT_LOCALE, key, params) });
+
+/**
+ * t() создаётся один раз на язык. Экраны указывают t в зависимостях загрузки данных: если бы функция менялась
+ * на каждом рендере, загрузка запускалась бы по кругу (календарь делал сотни запросов в секунду).
+ */
+export function LocaleProvider({ locale, children }: { locale: Locale; children: ReactNode }) {
+  const value = useMemo<LocaleValue>(() => ({ locale, t: (key, params) => translate(locale, key, params) }), [locale]);
+  return <LocaleContext.Provider value={value}>{children}</LocaleContext.Provider>;
+}
+
+/** Текущий язык и t() интерфейса; t стабильна, пока не сменится язык. */
+export function useT(): LocaleValue {
+  return useContext(LocaleContext);
 }
