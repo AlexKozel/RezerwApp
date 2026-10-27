@@ -39,6 +39,9 @@ export function BookingFlow({ slug, profile, locale }: { slug: string; profile: 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<BookingResult | null>(null);
+  // D-066: мастер требует оплату от клиента с неявками; сумма и путь назад показываются до записи.
+  const [deposit, setDeposit] = useState<{ amount: number; visitsLeft: number } | null>(null);
+  useEffect(() => setDeposit(null), [choice, slot]);
 
   // Слоты загружаются при выборе варианта; дни без времени не показываются.
   useEffect(() => {
@@ -70,7 +73,7 @@ export function BookingFlow({ slug, profile, locale }: { slug: string; profile: 
     else setError(errorMessage(r.error, locale));
   }
 
-  async function book() {
+  async function book(acceptDeposit = false) {
     if (!choice || !slot) return;
     setBusy(true);
     setError(null);
@@ -85,8 +88,14 @@ export function BookingFlow({ slug, profile, locale }: { slug: string; profile: 
       acceptTerms,
       acceptPrivacy,
       acceptHealth,
+      acceptDeposit,
     });
     setBusy(false);
+    if (r.error === 'DEPOSIT_REQUIRED' && typeof r.details?.amount === 'number' && typeof r.details.visitsLeft === 'number') {
+      setDeposit({ amount: r.details.amount, visitsLeft: r.details.visitsLeft });
+      return;
+    }
+    setDeposit(null);
     if (r.ok && r.data) {
       setResult(r.data);
       window.scrollTo({ top: 0 });
@@ -199,9 +208,21 @@ export function BookingFlow({ slug, profile, locale }: { slug: string; profile: 
               {error}
             </p>
           )}
-          <button type="submit" className="primary" disabled={!canBook}>
-            {t(locale, choice?.service.bookingFee ? 'widget.book_with_fee' : 'widget.book')}
-          </button>
+          {deposit && (
+            <div className="notice warn" role="alert">
+              <p style={{ margin: 0 }}>{t(locale, 'widget.deposit_required', { amount: formatMoney(deposit.amount, locale) })}</p>
+              <p style={{ margin: '8px 0 0' }}>{t(locale, 'widget.deposit_visits_left', { count: deposit.visitsLeft })}</p>
+              <button type="button" className="primary" disabled={busy} onClick={() => void book(true)}>
+                {t(locale, 'widget.book_with_fee')}
+              </button>
+            </div>
+          )}
+          {/* После DEPOSIT_REQUIRED остаётся одна кнопка: запись с обязанностью оплаты. */}
+          {!deposit && (
+            <button type="submit" className="primary" disabled={!canBook}>
+              {t(locale, choice?.service.bookingFee ? 'widget.book_with_fee' : 'widget.book')}
+            </button>
+          )}
         </form>
       )}
       {!slot && error && (
@@ -231,6 +252,7 @@ function Result({ result, timeZone, locale }: { result: BookingResult; timeZone:
           <p>{t(locale, 'booking.fee.instruction', { amount: formatMoney(fee.amount, locale), phone: fee.blikPhone, code: fee.code })}</p>
           <strong>{fee.code}</strong>
           {fee.recipient && <div className="muted">{fee.recipient}</div>}
+          {result.unreliableVisitsLeft !== null && <p className="muted">{t(locale, 'widget.deposit_visits_left', { count: result.unreliableVisitsLeft })}</p>}
         </div>
       )}
       <a className="primary" style={{ textAlign: 'center', textDecoration: 'none' }} href={`/b/${result.manageToken}?lang=${locale}`}>

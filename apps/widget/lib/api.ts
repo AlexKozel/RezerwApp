@@ -9,11 +9,19 @@ export interface ApiResult<T> {
   status: number;
   data: T | undefined;
   error: string | undefined;
+  /** Поля ответа с ошибкой (например, сумма при DEPOSIT_REQUIRED). */
+  details: Record<string, unknown> | undefined;
 }
 
 async function parse<T>(res: Response): Promise<ApiResult<T>> {
   const body = res.headers.get('content-type')?.includes('application/json') ? await res.json() : undefined;
-  return { ok: res.ok, status: res.status, data: res.ok ? (body as T) : undefined, error: res.ok ? undefined : (body?.error as string | undefined) };
+  return {
+    ok: res.ok,
+    status: res.status,
+    data: res.ok ? (body as T) : undefined,
+    error: res.ok ? undefined : (body?.error as string | undefined),
+    details: res.ok ? undefined : body,
+  };
 }
 
 /** Серверный запрос (Server Components): без кэша, данные записи меняются каждую минуту. */
@@ -35,7 +43,7 @@ export async function clientCall<T>(method: 'GET' | 'POST', path: string, body?:
     });
     return parse<T>(res);
   } catch {
-    return { ok: false, status: 0, data: undefined, error: 'NETWORK' };
+    return { ok: false, status: 0, data: undefined, error: 'NETWORK', details: undefined };
   }
 }
 
@@ -62,6 +70,8 @@ export interface BookingResult {
   holdExpiresAt: string | null;
   bookingFee: { amount: number; code: string; method: string; blikPhone: string | null; recipient: string | null } | null;
   manageToken: string;
+  /** Оплата взята по правилу мастера для повторяющихся неявок: визитов до её отмены (D-066). */
+  unreliableVisitsLeft: number | null;
 }
 
 export interface ManagedBooking {
