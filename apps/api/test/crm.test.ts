@@ -99,9 +99,9 @@ describe('CRM (D-050): карточка, заметки, blacklist, экспор
     assert.ok(audit.rows[0].n >= 1);
   });
 
-  test('assistant: карточка да; заметки, blacklist, экспорт, удаление, аудит нет', async () => {
+  test('assistant: карточка и заметки салона да (D-067); blacklist, экспорт, удаление, аудит нет', async () => {
     assert.equal((await assistant.get(`/clients/${clientA}`)).status, 200);
-    assert.equal((await assistant.get(`/clients/${clientA}/notes`)).status, 403);
+    assert.equal((await assistant.get(`/clients/${clientA}/notes`)).status, 200);
     assert.equal((await assistant.post(`/clients/${clientA}/blacklist`)).status, 403);
     assert.equal((await assistant.get('/clients/export')).status, 403);
     assert.equal((await assistant.delete(`/clients/${clientA}`)).status, 403);
@@ -109,19 +109,25 @@ describe('CRM (D-050): карточка, заметки, blacklist, экспор
     assert.equal((await staff.get('/audit')).status, 403);
   });
 
-  test('заметки шифруются; о здоровье только при согласии клиента (D-025, L-23)', async () => {
+  test('заметки (D-067): шифруются, общие для салона с подписью автора; удаляет автор или owner', async () => {
     assert.equal((await staff.post(`/clients/${clientA}/notes`, { body: 'Lubi kawę z mlekiem' })).status, 201);
-    assert.equal((await staff.post(`/clients/${clientA}/notes`, { body: 'Alergia na lateks', sensitivity: 'health' })).status, 201);
-    const refused = await owner.post(`/clients/${clientB}/notes`, { body: 'Alergia', sensitivity: 'health' });
-    assert.deepEqual([refused.status, refused.body], [409, { error: 'HEALTH_CONSENT_REQUIRED' }]);
+    assert.equal((await staff.post(`/clients/${clientA}/notes`, { body: 'Alergia na lateks' })).status, 201);
+    // Один вид заметок: запрета без согласия больше нет, основание обеспечивает салон; согласие видно в карточке.
+    assert.equal((await owner.post(`/clients/${clientB}/notes`, { body: 'Farba 7.1 + 6% oksydant' })).status, 201);
+    assert.equal((await assistant.post(`/clients/${clientB}/notes`, { body: 'Woli poranne terminy' })).status, 201);
 
-    const notes = (await owner.get(`/clients/${clientA}/notes`)).body;
-    assert.deepEqual(notes.map((n: { body: string }) => n.body).sort(), ['Alergia na lateks', 'Lubi kawę z mlekiem']);
+    const notes = (await assistant.get(`/clients/${clientA}/notes`)).body as Array<{ id: string; body: string; author: string; canDelete: boolean }>;
+    assert.deepEqual(notes.map((n) => n.body).sort(), ['Alergia na lateks', 'Lubi kawę z mlekiem']);
+    assert.deepEqual(new Set(notes.map((n) => n.author)), new Set(['Ola']), 'подпись: имя специалиста автора');
+    assert.ok(notes.every((n) => !n.canDelete), 'ассистент не удаляет чужие заметки');
     const raw = await db.admin.query('SELECT body_encrypted FROM client_notes WHERE client_id = $1', [clientA]);
     for (const r of raw.rows) assert.ok(!r.body_encrypted.toString('utf8').includes('lateks'));
 
-    const kawa = notes.find((n: { body: string }) => n.body.startsWith('Lubi'));
+    const kawa = notes.find((n) => n.body.startsWith('Lubi'))!;
+    assert.equal((await assistant.delete(`/clients/${clientA}/notes/${kawa.id}`)).status, 403);
     assert.equal((await staff.delete(`/clients/${clientA}/notes/${kawa.id}`)).status, 204);
+    const lateks = notes.find((n) => n.body.startsWith('Alergia'))!;
+    assert.equal((await owner.get(`/clients/${clientA}/notes`)).body.find((n: { id: string }) => n.id === lateks.id).canDelete, true);
     assert.equal((await owner.get(`/clients/${clientA}/notes`)).body.length, 1);
   });
 

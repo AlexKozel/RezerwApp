@@ -7,6 +7,7 @@ import {
   ClientBlockedError,
   HoldExpiredError,
   InvalidTransitionError,
+  NotAnIncidentError,
   NotFoundError,
   SlotTakenError,
   VersionConflictError,
@@ -35,6 +36,12 @@ export interface Booking {
 /** Запись для календаря мастера. */
 export interface CalendarBooking extends Booking {
   clientName: string;
+  /** Клиент сейчас «ненадёжный» (D-066): мастеру видно в календаре. */
+  clientUnreliable: boolean;
+  /** Отменено клиентом позже дедлайна политики. */
+  lateCancel: boolean;
+  /** Неявка или поздняя отмена прощена мастером (уважительная причина). */
+  excused: boolean;
   staffName: string;
   serviceName: Record<string, string>;
   variantName: Record<string, string>;
@@ -44,6 +51,7 @@ export interface CalendarBooking extends Booking {
 
 interface CalendarRow {
   client_name: string;
+  client_visits_left: number | null;
   staff_name: string;
   service_name: Record<string, string>;
   variant_name: Record<string, string>;
@@ -104,6 +112,8 @@ interface BookingRow {
   policy_id: string | null;
   policy_version: number | null;
   version: number;
+  late_cancel: boolean;
+  excused_at: Date | null;
 }
 
 function toBooking(row: BookingRow): Booking {
@@ -261,7 +271,8 @@ export class BookingsService {
   async list(accountId: string, from: Date, to: Date, staffId?: string): Promise<CalendarBooking[]> {
     return this.db.withAccount(accountId, async (client) => {
       const rows = await client.query<BookingRow & CalendarRow>(
-        `SELECT b.*, c.name AS client_name, st.display_name AS staff_name, sv.name_i18n AS service_name, v.name_i18n AS variant_name,
+        `SELECT b.*, c.name AS client_name, client_unreliable_visits_left(b.client_id) AS client_visits_left,
+                st.display_name AS staff_name, sv.name_i18n AS service_name, v.name_i18n AS variant_name,
                 pr.amount AS pay_amount, pr.code AS pay_code, pr.status AS pay_status
            FROM bookings b
            JOIN clients c ON c.id = b.client_id
@@ -276,6 +287,9 @@ export class BookingsService {
       return rows.rows.map((r) => ({
         ...toBooking(r),
         clientName: r.client_name,
+        clientUnreliable: r.client_visits_left !== null,
+        lateCancel: r.late_cancel,
+        excused: r.excused_at !== null,
         staffName: r.staff_name,
         serviceName: r.service_name,
         variantName: r.variant_name,
@@ -320,12 +334,14 @@ export class BookingsService {
       throw new HoldExpiredError();
     }
 
+    // Поздняя отмена клиентом фиксируется сейчас: дедлайн зависит от момента отмены (D-066).
+    const lateCancel = input.to === 'cancelled_by_client' && row.late;
     const updated = await client.query<BookingRow>(
       `UPDATE bookings
-          SET status = $2, hold_expires_at = NULL, version = version + 1
+          SET status = $2, hold_expires_at = NULL, version = version + 1, late_cancel = $3
         WHERE id = $1
         RETURNING *`,
-      [input.bookingId, input.to],
+      [input.bookingId, input.to, lateCancel],
     );
     const updatedRow = updated.rows[0];
     if (!updatedRow) throw new NotFoundError('booking');
@@ -338,8 +354,26 @@ export class BookingsService {
       from: row.status,
       to: input.to,
       ...(payment ? { payment } : {}),
+      ...(lateCancel ? { late: true } : {}),
     });
     return toBooking(updatedRow);
+  }
+
+  /**
+   * Уважительная причина (D-066): неявка или поздняя отмена не считается при определении «ненадёжного
+   * клиента». excused = false возвращает случай в счёт.
+   */
+  async excuse(accountId: string, bookingId: string, excused: boolean): Promise<void> {
+    await this.db.withAccount(accountId, async (client) => {
+      const row = (await client.query<{ status: BookingStatus; late_cancel: boolean }>(
+        'SELECT status, late_cancel FROM bookings WHERE id = $1 FOR UPDATE',
+        [bookingId],
+      )).rows[0];
+      if (!row) throw new NotFoundError('booking');
+      if (!(row.status === 'no_show' || (row.status === 'cancelled_by_client' && row.late_cancel))) throw new NotAnIncidentError();
+      await client.query('UPDATE bookings SET excused_at = CASE WHEN $2 THEN COALESCE(excused_at, now()) END WHERE id = $1', [bookingId, excused]);
+      await addEvent(client, accountId, bookingId, excused ? 'excused' : 'excuse_revoked', 'master', {});
+    });
   }
 
   /** Фоновая задача: переводит просроченные pending в expired. Возвращает число освобождённых слотов. */

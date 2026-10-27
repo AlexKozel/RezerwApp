@@ -97,4 +97,26 @@ export class AccountController {
     input.done();
     return this.settings.updatePayment(s.accountId, patch);
   }
+
+  /** «Ненадёжный клиент» (D-066): порог случаев за 12 месяцев, визитов до снятия, предоплата в % (до 50%, D-014). */
+  @Get('account/reliability')
+  @Roles(['owner'])
+  reliability(@CurrentSession() s: Session) {
+    return this.settings.getReliability(s.accountId);
+  }
+
+  /** Тело: { threshold?: 1..10, redeemVisits?: 1..10, depositPercent?: 1..50 | null }. */
+  @Patch('account/reliability')
+  @Roles(['owner'])
+  updateReliability(@CurrentSession() s: Session, @Body() body: unknown) {
+    const input = new Input(body);
+    const raw = (body ?? {}) as Record<string, unknown>;
+    const patch = {
+      threshold: input.optInt('threshold', { min: 1, max: 10 }),
+      redeemVisits: input.optInt('redeemVisits', { min: 1, max: 10 }),
+      depositPercent: raw.depositPercent === null ? null : input.optInt('depositPercent', { min: 1, max: 50 }),
+    };
+    input.done();
+    return this.settings.updateReliability(s.accountId, patch);
+  }
 }

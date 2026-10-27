@@ -12,7 +12,8 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
  * CRM (D-050, D-065). owner и assistant видят всю базу Account, staff только своих клиентов (с записями к нему
- * или добавленных им вручную). Заметки и blacklist: owner и staff; экспорт, анонимизация и журнал аудита: только owner.
+ * или добавленных им вручную). Заметки общие для салона, видят все роли (D-067); удаляет автор или owner.
+ * Blacklist и отметка «ненадёжный»: owner и staff; экспорт, анонимизация и журнал аудита: только owner.
  */
 @Controller()
 @UseGuards(SessionGuard)
@@ -23,7 +24,7 @@ export class ClientsController {
   ) {}
 
   private async viewer(s: Session): Promise<Viewer> {
-    return { accountId: s.accountId, userId: s.userId, staffIds: await this.access.scope(s) };
+    return { accountId: s.accountId, userId: s.userId, role: s.role, staffIds: await this.access.scope(s) };
   }
 
   @Get('clients')
@@ -122,24 +123,31 @@ export class ClientsController {
   }
 
   @Get('clients/:id/notes')
-  @Roles(['owner', 'staff'])
   async notes(@CurrentSession() s: Session, @Param('id', ParseUUIDPipe) id: string) {
     return this.crm.notes(await this.viewer(s), id);
   }
 
-  /** Тело: { body, sensitivity?: "normal" | "health" }. Диагнозы не вносить (подсказка notes.health_warning). */
+  /** Тело: { body }. Данные о здоровье: только при согласии клиента (напоминание в карточке, D-067). */
   @Post('clients/:id/notes')
-  @Roles(['owner', 'staff'])
   async addNote(@CurrentSession() s: Session, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown) {
     const input = new Input(body);
     const text = input.string('body', { max: 5000 });
-    const sensitivity = input.optOneOf('sensitivity', ['normal', 'health'] as const) ?? 'normal';
     input.done();
-    return this.crm.addNote(await this.viewer(s), id, text, sensitivity);
+    return this.crm.addNote(await this.viewer(s), id, text);
+  }
+
+  /** Отметка «ненадёжный» вручную (D-066). Тело: { marked: true | false }. */
+  @Post('clients/:id/unreliable')
+  @Roles(['owner', 'staff'])
+  @HttpCode(204)
+  async markUnreliable(@CurrentSession() s: Session, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown): Promise<void> {
+    const input = new Input(body);
+    const marked = input.bool('marked');
+    input.done();
+    await this.crm.markUnreliable(await this.viewer(s), id, marked);
   }
 
   @Delete('clients/:id/notes/:noteId')
-  @Roles(['owner', 'staff'])
   @HttpCode(204)
   async deleteNote(
     @CurrentSession() s: Session,

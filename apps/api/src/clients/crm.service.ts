@@ -6,7 +6,7 @@ import { ForbiddenError } from '../auth/auth.guard';
 import type { FieldCipher } from '../crypto/field-cipher';
 import type { PhoneHasher } from '../crypto/phone-hash';
 import type { Db } from '../db/db';
-import { AppError, ConflictError, NotFoundError, ValidationError } from '../errors';
+import { ConflictError, NotFoundError, ValidationError } from '../errors';
 import type { ClientsService } from './clients.service';
 import { parseCsv, unescapeFormula } from './csv';
 
@@ -18,6 +18,8 @@ export interface Viewer {
   accountId: string;
   userId: string;
   staffIds: string[] | null;
+  /** Удалять чужие заметки может только owner (D-067). */
+  role: 'owner' | 'staff' | 'assistant';
 }
 
 export interface ClientSummary {
@@ -26,6 +28,8 @@ export interface ClientSummary {
   language: Locale;
   createdAt: Date;
   anonymized: boolean;
+  /** Сейчас «ненадёжный» (D-066). */
+  unreliable: boolean;
 }
 
 export interface ClientCard extends ClientSummary {
@@ -35,15 +39,22 @@ export interface ClientCard extends ClientSummary {
   birthday: string | null;
   blacklisted: { reason: string | null; expiresAt: Date } | null;
   stats: { completed: number; noShow: number; cancelledByClient: number };
-  bookings: Array<{ id: string; staffId: string; startsAt: Date; status: string }>;
+  bookings: Array<{ id: string; staffId: string; startsAt: Date; status: string; lateCancel: boolean; excused: boolean }>;
+  /** D-066: visitsLeft — сколько посещённых визитов до снятия отметки; marked — отмечен мастером вручную. */
+  reliability: { unreliable: boolean; visitsLeft: number | null; marked: boolean };
   consents: Array<{ type: string; textVersion: string; givenAt: Date; revokedAt: Date | null }>;
 }
 
 export interface Note {
   id: string;
   body: string;
+  /** Пометка старых заметок (до D-067); новые всегда normal. */
   sensitivity: 'normal' | 'health';
   createdAt: Date;
+  /** Имя специалиста или email автора; null у заметок до D-067 и удалённых пользователей. */
+  author: string | null;
+  /** Автор или owner: можно удалить. */
+  canDelete: boolean;
 }
 
 export interface ImportReport {
@@ -128,12 +139,6 @@ export class ClientExistsError extends ConflictError {
   }
 }
 
-export class HealthConsentRequiredError extends AppError {
-  constructor() {
-    super('HEALTH_CONSENT_REQUIRED', 'Client has not consented to processing health data');
-  }
-}
-
 function csvCell(value: unknown): string {
   let text = value === null || value === undefined ? '' : value instanceof Date ? value.toISOString() : String(value);
   // Защита от формул в Excel/Sheets: значение, начинающееся с = + - @, открывается как текст.
@@ -163,8 +168,9 @@ export class CrmService {
     return this.db.withAccount(viewer.accountId, async (client) => {
       const phone = query.search ? this.hasher.hashInput(query.search) : null;
       const namePattern = query.search && !phone ? `%${query.search.toLowerCase().replace(/[\\%_]/g, (m) => `\\${m}`)}%` : null;
-      const rows = await client.query<{ id: string; name: string; language: Locale; created_at: Date; anonymized_at: Date | null }>(
-        `SELECT c.id, c.name, c.language, c.created_at, c.anonymized_at FROM clients c
+      const rows = await client.query<{ id: string; name: string; language: Locale; created_at: Date; anonymized_at: Date | null; unreliable: boolean }>(
+        `SELECT c.id, c.name, c.language, c.created_at, c.anonymized_at, client_unreliable_visits_left(c.id) IS NOT NULL AS unreliable
+           FROM clients c
           WHERE ($1::bytea IS NULL OR c.phone_hash = $1)
             AND ($2::text IS NULL OR lower(c.name) LIKE $2)
             AND ${visibleTo(3)}
@@ -172,7 +178,14 @@ export class CrmService {
           LIMIT $4 OFFSET $5`,
         [phone?.hash ?? null, namePattern, viewer.staffIds, LIST_LIMIT, query.offset ?? 0],
       );
-      return rows.rows.map((r) => ({ id: r.id, name: r.name, language: r.language, createdAt: r.created_at, anonymized: r.anonymized_at !== null }));
+      return rows.rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        language: r.language,
+        createdAt: r.created_at,
+        anonymized: r.anonymized_at !== null,
+        unreliable: r.unreliable,
+      }));
     });
   }
 
@@ -226,13 +239,14 @@ export class CrmService {
         'SELECT reason, expires_at FROM blacklist_entries WHERE phone_hash = $1 AND expires_at > now()',
         [row.phone_hash],
       )).rows[0];
-      const bookings = await client.query<{ id: string; staff_id: string; starts_at: Date; status: string }>(
-        `SELECT id, staff_id, starts_at, status FROM bookings
+      const bookings = await client.query<{ id: string; staff_id: string; starts_at: Date; status: string; late_cancel: boolean; excused_at: Date | null }>(
+        `SELECT id, staff_id, starts_at, status, late_cancel, excused_at FROM bookings
           WHERE client_id = $1 AND ($2::uuid[] IS NULL OR staff_id = ANY($2))
           ORDER BY starts_at DESC LIMIT 100`,
         [clientId, viewer.staffIds],
       );
       const count = (status: string) => bookings.rows.filter((b) => b.status === status).length;
+      const visitsLeft = (await client.query<{ n: number | null }>('SELECT client_unreliable_visits_left($1) AS n', [clientId])).rows[0]!.n;
       const consents = await client.query<{ type: string; text_version: string; given_at: Date; revoked_at: Date | null }>(
         'SELECT type, text_version, given_at, revoked_at FROM consents WHERE client_id = $1 ORDER BY given_at DESC',
         [clientId],
@@ -243,12 +257,21 @@ export class CrmService {
         language: row.language,
         createdAt: row.created_at,
         anonymized: row.anonymized_at !== null,
+        unreliable: visitsLeft !== null,
+        reliability: { unreliable: visitsLeft !== null, visitsLeft, marked: row.unreliable_since !== null },
         phone,
         email: row.email,
         birthday: birthdayOf(row),
         blacklisted: blacklist ? { reason: blacklist.reason, expiresAt: blacklist.expires_at } : null,
         stats: { completed: count('completed'), noShow: count('no_show'), cancelledByClient: count('cancelled_by_client') },
-        bookings: bookings.rows.map((b) => ({ id: b.id, staffId: b.staff_id, startsAt: b.starts_at, status: b.status })),
+        bookings: bookings.rows.map((b) => ({
+          id: b.id,
+          staffId: b.staff_id,
+          startsAt: b.starts_at,
+          status: b.status,
+          lateCancel: b.late_cancel,
+          excused: b.excused_at !== null,
+        })),
         consents: consents.rows.map((c) => ({ type: c.type, textVersion: c.text_version, givenAt: c.given_at, revokedAt: c.revoked_at })),
       };
     });
@@ -282,49 +305,87 @@ export class CrmService {
     });
   }
 
-  // --- Заметки (D-025) ---
+  // --- Заметки (D-025, D-067) ---
 
+  /** Заметки общие для салона: видит каждый, кому виден клиент, включая ассистента (D-067). */
   async notes(viewer: Viewer, clientId: string): Promise<Note[]> {
     return this.db.withAccount(viewer.accountId, async (client) => {
       await this.visible(client, viewer, clientId);
-      const rows = await client.query<{ id: string; body_encrypted: Buffer; sensitivity: Note['sensitivity']; created_at: Date }>(
-        'SELECT id, body_encrypted, sensitivity, created_at FROM client_notes WHERE client_id = $1 ORDER BY created_at DESC',
+      const rows = await client.query<{
+        id: string;
+        body_encrypted: Buffer;
+        sensitivity: Note['sensitivity'];
+        created_at: Date;
+        author_id: string | null;
+        author: string | null;
+      }>(
+        `SELECT n.id, n.body_encrypted, n.sensitivity, n.created_at, n.author_id,
+                COALESCE((SELECT st.display_name FROM staff st WHERE st.user_id = n.author_id ORDER BY st.created_at LIMIT 1), u.email) AS author
+           FROM client_notes n LEFT JOIN users u ON u.id = n.author_id
+          WHERE n.client_id = $1 ORDER BY n.created_at DESC`,
         [clientId],
       );
       await audit(client, viewer.accountId, viewer.userId, 'notes.read', 'client', clientId);
       const notes: Note[] = [];
       for (const r of rows.rows) {
-        notes.push({ id: r.id, body: await this.cipher.decrypt(client, viewer.accountId, r.body_encrypted), sensitivity: r.sensitivity, createdAt: r.created_at });
+        notes.push({
+          id: r.id,
+          body: await this.cipher.decrypt(client, viewer.accountId, r.body_encrypted),
+          sensitivity: r.sensitivity,
+          createdAt: r.created_at,
+          author: r.author,
+          canDelete: viewer.role === 'owner' || r.author_id === viewer.userId,
+        });
       }
       return notes;
     });
   }
 
-  /** Заметка о здоровье только при действующем согласии клиента (D-025, L-23). */
-  async addNote(viewer: Viewer, clientId: string, body: string, sensitivity: Note['sensitivity']): Promise<{ id: string }> {
+  /**
+   * Заметка (аллергии, формулы краски, предпочтения). Один вид заметок (D-067): основание для записи данных
+   * о здоровье обеспечивает салон как администратор данных; карточка показывает, есть ли согласие клиента.
+   */
+  async addNote(viewer: Viewer, clientId: string, body: string): Promise<{ id: string }> {
     return this.db.withAccount(viewer.accountId, async (client) => {
       const row = await this.visible(client, viewer, clientId);
       if (row.anonymized_at) throw new ConflictError('CLIENT_ANONYMIZED', 'Client data was erased');
-      if (sensitivity === 'health') {
-        const consent = await client.query("SELECT 1 FROM consents WHERE client_id = $1 AND type = 'health' AND revoked_at IS NULL", [clientId]);
-        if (consent.rowCount === 0) throw new HealthConsentRequiredError();
-      }
       const encrypted = await this.cipher.encrypt(client, viewer.accountId, body);
       const inserted = await client.query<{ id: string }>(
-        'INSERT INTO client_notes (account_id, client_id, body_encrypted, sensitivity) VALUES ($1, $2, $3, $4) RETURNING id',
-        [viewer.accountId, clientId, encrypted, sensitivity],
+        'INSERT INTO client_notes (account_id, client_id, body_encrypted, author_id) VALUES ($1, $2, $3, $4) RETURNING id',
+        [viewer.accountId, clientId, encrypted, viewer.userId],
       );
       await audit(client, viewer.accountId, viewer.userId, 'notes.write', 'client', clientId);
       return { id: inserted.rows[0]!.id };
     });
   }
 
+  /** Удаляет автор или owner; чужую заметку остальным удалить нельзя. */
   async deleteNote(viewer: Viewer, clientId: string, noteId: string): Promise<void> {
     await this.db.withAccount(viewer.accountId, async (client) => {
       await this.visible(client, viewer, clientId);
-      const deleted = await client.query('DELETE FROM client_notes WHERE id = $1 AND client_id = $2', [noteId, clientId]);
-      if (deleted.rowCount === 0) throw new NotFoundError('note');
+      const note = (await client.query<{ author_id: string | null }>('SELECT author_id FROM client_notes WHERE id = $1 AND client_id = $2 FOR UPDATE', [
+        noteId,
+        clientId,
+      ])).rows[0];
+      if (!note) throw new NotFoundError('note');
+      if (viewer.role !== 'owner' && note.author_id !== viewer.userId) throw new ForbiddenError();
+      await client.query('DELETE FROM client_notes WHERE id = $1', [noteId]);
       await audit(client, viewer.accountId, viewer.userId, 'notes.delete', 'client', clientId);
+    });
+  }
+
+  // --- Ненадёжный клиент (D-066) ---
+
+  /** Ручная отметка мастера. Снимает только ручную отметку: случаи прощаются уважительной причиной у записи. */
+  async markUnreliable(viewer: Viewer, clientId: string, marked: boolean): Promise<void> {
+    await this.db.withAccount(viewer.accountId, async (client) => {
+      const row = await this.visible(client, viewer, clientId);
+      if (row.anonymized_at) throw new ConflictError('CLIENT_ANONYMIZED', 'Client data was erased');
+      await client.query('UPDATE clients SET unreliable_since = CASE WHEN $2 THEN COALESCE(unreliable_since, now()) END WHERE id = $1', [
+        clientId,
+        marked,
+      ]);
+      await audit(client, viewer.accountId, viewer.userId, 'client.unreliable', 'client', clientId);
     });
   }
 
@@ -521,6 +582,7 @@ export class CrmService {
       phone_hash: Buffer;
       birth_month: number | null;
       birth_day: number | null;
+      unreliable_since: Date | null;
       created_at: Date;
       anonymized_at: Date | null;
     }>(

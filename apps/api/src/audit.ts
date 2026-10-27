@@ -6,6 +6,8 @@ export type AuditAction =
   | 'client.anonymize'
   // Сотрудник привязал к себе клиента другого мастера, внеся его номер (D-065).
   | 'client.link'
+  // Ручная отметка «ненадёжный» поставлена или снята (D-066).
+  | 'client.unreliable'
   | 'notes.read'
   | 'notes.write'
   | 'notes.delete'

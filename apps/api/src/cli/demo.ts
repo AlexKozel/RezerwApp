@@ -146,6 +146,13 @@ async function seed(db: Db, migrator: Pool): Promise<void> {
 
   const past = await book(anna, manicure, 0, at(addDays(today, -1), 10));
   await bookings.transition({ accountId, bookingId: past.id, to: 'completed', actor: 'master' });
+  // «Ненадёжная» клиентка (D-066): у Marta две неявки; предоплата 20% для ненадёжных включена, в виджете
+  // с её номером (+48 503 555 666) запись попросит оплату.
+  for (const days of [-20, -10]) {
+    const missed = await book(anna, henna, 2, at(addDays(today, days), 14));
+    await bookings.transition({ accountId, bookingId: missed.id, to: 'no_show', actor: 'master' });
+  }
+  await new AccountSettingsService(db).updateReliability(accountId, { depositPercent: 20 });
   // Сегодняшний визит, если день ещё не закончился.
   if (at(today, 16) > new Date()) await book(anna, manicure, 1, at(today, 16));
   await book(anna, henna, 2, at(addDays(today, 1), 11));

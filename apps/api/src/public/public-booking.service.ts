@@ -36,6 +36,8 @@ export interface PublicBookingInput {
   acceptPrivacy: boolean;
   /** Необязательное согласие на обработку данных о здоровье (L-23). */
   acceptHealth?: boolean;
+  /** Клиент увидел и принял предоплату для ненадёжного клиента (ответ DEPOSIT_REQUIRED, D-066). */
+  acceptDeposit?: boolean;
   ip: string;
   now?: Date;
 }
@@ -50,6 +52,25 @@ export interface PublicBookingResult {
   bookingFee: { amount: number; code: string; method: string; blikPhone: string | null; recipient: string | null } | null;
   /** Токен ссылки управления записью (перенос, отмена), BOOKING_FLOW.md, раздел 5. */
   manageToken: string;
+  /** Предоплата взята как с ненадёжного клиента: столько посещённых визитов до её отмены (D-066). */
+  unreliableVisitsLeft: number | null;
+}
+
+/**
+ * Клиенту нужна предоплата как ненадёжному (D-066): сумма и путь назад показываются до записи, запись не
+ * создаётся, пока клиент не подтвердит (acceptDeposit). Слово «ненадёжный» наружу не уходит.
+ */
+export class DepositRequiredError extends ConflictError {
+  constructor(amount: number, visitsLeft: number) {
+    super('DEPOSIT_REQUIRED', 'A booking fee is required for this booking', { amount, visitsLeft });
+  }
+}
+
+/** Сумма резервационной оплаты: не выше 50% фактической цены (D-014). */
+function feeAmount(terms: Pick<ServiceTerms, 'deposit_mode' | 'deposit_value' | 'price'>): number {
+  const price = Number(terms.price);
+  const raw = terms.deposit_mode === 'percent' ? (price * Number(terms.deposit_value)) / 100 : Number(terms.deposit_value);
+  return Math.round(Math.min(raw, price / 2) * 100) / 100;
 }
 
 interface ServiceTerms {
@@ -151,7 +172,20 @@ export class PublicBookingService {
         "SELECT 1 FROM bookings WHERE client_id = $1 AND staff_id = $2 AND status = 'completed' LIMIT 1",
         [person.id, staffId],
       )).rowCount! > 0;
-      const feeRequired = terms.deposit_mode !== 'none' && (terms.deposit_scope === 'all' || !trusted);
+      const serviceFee = terms.deposit_mode !== 'none' && (terms.deposit_scope === 'all' || !trusted);
+      // D-066: ненадёжному клиенту предоплата по правилу Account, если услуга сама её не требует.
+      const reliability = (await client.query<{ visits_left: number | null; percent: number | null }>(
+        'SELECT client_unreliable_visits_left($1) AS visits_left, (SELECT unreliable_deposit_percent FROM accounts) AS percent',
+        [person.id],
+      )).rows[0]!;
+      const unreliableFee = !serviceFee && reliability.visits_left !== null && reliability.percent !== null;
+      const feeTerms: ServiceTerms | null = serviceFee
+        ? terms
+        : unreliableFee
+          ? { ...terms, deposit_mode: 'percent', deposit_value: String(reliability.percent), prepayment_method: 'manual_blik' }
+          : null;
+      if (unreliableFee && !input.acceptDeposit) throw new DepositRequiredError(feeAmount(feeTerms!), reliability.visits_left!);
+      const feeRequired = feeTerms !== null;
       // D-016 и D-045: сразу confirmed только без оплаты и если клиент доверенный или мастер не требует ручного подтверждения.
       const confirmNow = !feeRequired && (trusted || !terms.requires_manual_confirm);
 
@@ -175,7 +209,7 @@ export class PublicBookingService {
         ]);
       }
 
-      const bookingFee = feeRequired ? await this.createPaymentRequest(client, accountId, booking.id, terms) : null;
+      const bookingFee = feeTerms ? await this.createPaymentRequest(client, accountId, booking.id, feeTerms) : null;
       return {
         bookingId: booking.id,
         status: booking.status,
@@ -184,6 +218,7 @@ export class PublicBookingService {
         holdExpiresAt: booking.holdExpiresAt,
         bookingFee,
         manageToken: this.tokens.issue(accountId, booking.id),
+        unreliableVisitsLeft: unreliableFee ? reliability.visits_left : null,
       };
     });
     await notifySafely(this.notifier, { type: 'booking.created', accountId, bookingId: result.bookingId, status: result.status });
@@ -225,9 +260,7 @@ export class PublicBookingService {
    * персональная цена специалиста может быть ниже цены варианта, по которой проверялся каталог.
    */
   private async createPaymentRequest(client: PoolClient, accountId: string, bookingId: string, terms: ServiceTerms) {
-    const price = Number(terms.price);
-    const raw = terms.deposit_mode === 'percent' ? (price * Number(terms.deposit_value)) / 100 : Number(terms.deposit_value);
-    const amount = Math.round(Math.min(raw, price / 2) * 100) / 100;
+    const amount = feeAmount(terms);
     if (amount <= 0) return null;
     const mode = terms.prepayment_method === 'provider_link' ? 'provider_link' : 'manual_blik';
     const payment = await readPayment(client);

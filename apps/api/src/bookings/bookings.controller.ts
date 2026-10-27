@@ -1,7 +1,7 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { BOOKING_STATUSES, LOCALES } from '@rezerwapp/shared';
 import { StaffAccess } from '../auth/access';
-import { CurrentSession, SessionGuard } from '../auth/auth.guard';
+import { CurrentSession, Roles, SessionGuard } from '../auth/auth.guard';
 import type { Session } from '../auth/session-store';
 import { Input } from '../http/validate';
 import { BookingsService } from './bookings.service';
@@ -67,5 +67,17 @@ export class BookingsController {
     input.done();
     await this.access.assertBooking(s, id);
     return this.bookings.transition({ accountId: s.accountId, bookingId: id, to, actor: 'master', expectedVersion });
+  }
+
+  /** Уважительная причина неявки или поздней отмены (D-066). Тело: { excused: true | false }. */
+  @Post(':id/excuse')
+  @Roles(['owner', 'staff'])
+  @HttpCode(204)
+  async excuse(@CurrentSession() s: Session, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown): Promise<void> {
+    const input = new Input(body);
+    const excused = input.bool('excused');
+    input.done();
+    await this.access.assertBooking(s, id);
+    await this.bookings.excuse(s.accountId, id, excused);
   }
 }

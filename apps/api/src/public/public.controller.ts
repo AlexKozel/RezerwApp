@@ -58,6 +58,7 @@ export class PublicController {
       acceptTerms: input.bool('acceptTerms'),
       acceptPrivacy: input.bool('acceptPrivacy'),
       acceptHealth: input.optBool('acceptHealth') ?? false,
+      acceptDeposit: input.optBool('acceptDeposit') ?? false,
       ip,
     };
     input.done();

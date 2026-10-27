@@ -31,6 +31,13 @@ export class VersionConflictError extends BookingError {
   }
 }
 
+/** Уважительную причину можно отметить только у неявки или поздней отмены (D-066). */
+export class NotAnIncidentError extends BookingError {
+  constructor() {
+    super('NOT_AN_INCIDENT', 'Only a no-show or a late cancellation can be excused');
+  }
+}
+
 /** Срок hold истёк: подтвердить нельзя, запись будет переведена в expired (booking.hold.expired). */
 export class HoldExpiredError extends BookingError {
   constructor() {
