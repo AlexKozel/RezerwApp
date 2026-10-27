@@ -4,6 +4,89 @@ import { api, type Me, type Staff } from '../api';
 import { LANGUAGE_NAMES, useT } from '../i18n';
 import { invalidRows, toIntervals, toRows, type ApiInterval, type DayRow } from '../lib/hours';
 
+interface Reliability {
+  threshold: number;
+  redeemVisits: number;
+  depositPercent: number | null;
+}
+
+/**
+ * «Ненадёжные клиенты» (D-066, owner): порог случаев, визиты до снятия отметки, предоплата для ненадёжных в % цены
+ * (до 50%, выше 30% предупреждение, как у оплаты услуг, D-014). Без номера BLIK включить предоплату нельзя.
+ */
+function ReliabilitySection() {
+  const { t } = useT();
+  const [value, setValue] = useState<Reliability | null>(null);
+  const [percent, setPercent] = useState('');
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    void api<Reliability>('GET', '/account/reliability').then((r) => {
+      if (!r.data) return;
+      setValue(r.data);
+      setPercent(r.data.depositPercent === null ? '' : String(r.data.depositPercent));
+    });
+  }, []);
+
+  if (!value) return null;
+  const n = Number(percent);
+  const percentValid = Number.isInteger(n) && n >= 1 && n <= 50;
+  const enabled = value.depositPercent !== null || percent !== '';
+
+  async function save(patch: Partial<Reliability>) {
+    const r = await api<Reliability>('PATCH', '/account/reliability', patch);
+    if (r.data) {
+      setValue(r.data);
+      setPercent(r.data.depositPercent === null ? '' : String(r.data.depositPercent));
+    }
+    setMessage({ ok: r.ok, text: t(r.ok ? 'pwa.set.saved' : r.error === 'VALIDATION' && patch.depositPercent ? 'pwa.set.blik_required' : 'pwa.error') });
+  }
+
+  const counter = (label: string, current: number, key: 'threshold' | 'redeemVisits') => (
+    <>
+      <label htmlFor={`rel-${key}`}>{label}</label>
+      <select id={`rel-${key}`} value={current} onChange={(e) => void save({ [key]: Number(e.target.value) })}>
+        {[1, 2, 3, 4, 5].map((v) => (
+          <option key={v} value={v}>
+            {v}
+          </option>
+        ))}
+      </select>
+    </>
+  );
+
+  return (
+    <section>
+      <h2>{t('pwa.set.reliability')}</h2>
+      <p className="muted">{t('pwa.set.reliability_hint')}</p>
+      {counter(t('pwa.set.unreliable_threshold'), value.threshold, 'threshold')}
+      {counter(t('pwa.set.unreliable_redeem'), value.redeemVisits, 'redeemVisits')}
+      <label className="check" style={{ marginTop: 16 }}>
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => (e.target.checked ? setPercent('20') : void save({ depositPercent: null }))}
+        />
+        <span>{t('pwa.set.unreliable_deposit')}</span>
+      </label>
+      <p className="muted">{t('pwa.set.unreliable_deposit_hint')}</p>
+      {enabled && (
+        <div className="row">
+          <div>
+            <label htmlFor="rel-percent">{t('pwa.set.percent')}</label>
+            <input id="rel-percent" type="text" inputMode="numeric" value={percent} onChange={(e) => setPercent(e.target.value.replace(/\D/g, ''))} />
+          </div>
+          <button type="button" className="secondary" disabled={!percentValid} onClick={() => void save({ depositPercent: n })}>
+            {t('pwa.set.save')}
+          </button>
+        </div>
+      )}
+      {enabled && percentValid && n > 30 && <p className="notice warn">{t('pwa.cat.fee_warning')}</p>}
+      {message && <p className={`notice ${message.ok ? 'ok' : 'error'}`}>{message.text}</p>}
+    </section>
+  );
+}
+
 /** Адрес виджета клиента для ссылки «link in bio». */
 const PUBLIC_URL = (import.meta.env.VITE_PUBLIC_URL as string | undefined) ?? 'http://localhost:3002';
 
@@ -157,6 +240,8 @@ export function Settings({ me, onLogout, onLocale }: { me: Me; onLogout: () => v
           </button>
         </section>
       )}
+
+      {me.role === 'owner' && <ReliabilitySection />}
 
       <h2>{t('widget.language')}</h2>
       <div className="days">

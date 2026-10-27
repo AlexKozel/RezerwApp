@@ -386,3 +386,8 @@ select.lang-select { width: auto; min-height: 36px; padding: 4px 8px; font-size:
 .title-row .chip { text-decoration: none; flex: none; }
 .row.birthday > select { flex: 1; }
 .row.birthday > select:last-child { flex: 0 0 96px; }
+
+/* Значок «ненадёжный клиент» (D-066) рядом с именем: в списке, карточке записи, выборе клиента. */
+.badge { display: inline-block; font-size: 0.75rem; font-weight: 600; padding: 1px 8px; border-radius: 999px; margin-left: 6px; }
+.badge.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
+.option .badge { flex: none; }

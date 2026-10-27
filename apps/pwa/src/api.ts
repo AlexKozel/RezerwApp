@@ -64,6 +64,7 @@ export interface CalendarBooking {
   id: string;
   staffId: string;
   clientId: string;
+  clientUnreliable: boolean;
   startsAt: string;
   endsAt: string;
   status: string;
@@ -88,6 +89,8 @@ export interface ClientSummary {
   id: string;
   name: string;
   anonymized: boolean;
+  /** «Ненадёжный» сейчас (D-066). */
+  unreliable: boolean;
 }
 
 export interface ClientBirthday {
@@ -104,6 +107,7 @@ export interface ClientCard extends ClientSummary {
   birthday: string | null;
   blacklisted: { reason: string | null; expiresAt: string } | null;
   stats: { completed: number; noShow: number; cancelledByClient: number };
-  bookings: Array<{ id: string; staffId: string; startsAt: string; status: string }>;
+  bookings: Array<{ id: string; staffId: string; startsAt: string; status: string; lateCancel: boolean; excused: boolean }>;
+  reliability: { unreliable: boolean; visitsLeft: number | null; marked: boolean };
   consents: Array<{ type: string; textVersion: string; givenAt: string; revokedAt: string | null }>;
 }

@@ -121,7 +121,8 @@ export function NewBooking({ me, day: initialDay, time, staffId: initialStaff }:
           <input type="search" aria-label={t('pwa.new.search')} placeholder={t('pwa.new.search')} value={query} onChange={(e) => setQuery(e.target.value)} />
           {found.map((c) => (
             <button key={c.id} type="button" className="option" onClick={() => setClient(c)}>
-              {c.name}
+              <span>{c.name}</span>
+              {c.unreliable && <span className="badge warn">{t('pwa.client.unreliable')}</span>}
             </button>
           ))}
           <button type="button" className="chip" style={{ marginTop: 8 }} onClick={() => setNewClient(true)}>

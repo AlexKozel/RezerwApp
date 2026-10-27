@@ -109,6 +109,7 @@ export function Calendar({ me }: { me: Me }) {
       </div>
       <div>
         <a href={`#/clients/${b.clientId}`}>{b.clientName}</a>
+        {b.clientUnreliable && <span className="badge warn"> {t('pwa.client.unreliable')}</span>}
         <div>
           {pickText(b.serviceName, locale)}
           {pickText(b.variantName, locale) && <span className="muted"> · {pickText(b.variantName, locale)}</span>}

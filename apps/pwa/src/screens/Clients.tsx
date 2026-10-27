@@ -35,7 +35,10 @@ export function Clients() {
       ) : (
         list.map((c) => (
           <a key={c.id} className="option" href={`#/clients/${c.id}`}>
-            <span>{c.anonymized ? '—' : c.name}</span>
+            <span>
+              {c.anonymized ? '—' : c.name}
+              {c.unreliable && <span className="badge warn"> {t('pwa.client.unreliable')}</span>}
+            </span>
             <span aria-hidden="true">›</span>
           </a>
         ))
@@ -49,11 +52,14 @@ interface Note {
   body: string;
   sensitivity: 'normal' | 'health';
   createdAt: string;
+  author: string | null;
+  canDelete: boolean;
 }
 
 /**
  * Карточка клиента: телефон (каждое открытие пишется в журнал аудита), день рождения, история, заметки и blacklist.
- * Заметки и blacklist у owner и staff; assistant их не видит (D-050). notice: откуда пришли из «Новый клиент»
+ * Заметки общие для салона, видят все роли, удаляет автор или owner (D-067); blacklist, отметка «ненадёжный» и
+ * уважительная причина у owner и staff (D-066). notice: откуда пришли из «Новый клиент»
  * (exists: номер уже был в базе; linked: клиент другого мастера привязан к сотруднику, D-065).
  */
 export function ClientCardScreen({ me, clientId, notice }: { me: Me; clientId: string; notice?: string }) {
@@ -61,31 +67,44 @@ export function ClientCardScreen({ me, clientId, notice }: { me: Me; clientId: s
   const [card, setCard] = useState<ClientCard | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
   const [note, setNote] = useState('');
-  const [health, setHealth] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editBirthday, setEditBirthday] = useState(false);
   const [birthday, setBirthday] = useState<string | null>(null);
-  const canNotes = me.role !== 'assistant';
+  const canManage = me.role !== 'assistant';
   const hasHealthConsent = card?.consents.some((c) => c.type === 'health' && !c.revokedAt) ?? false;
 
   const load = useCallback(async () => {
     const r = await api<ClientCard>('GET', `/clients/${clientId}`);
     setCard(r.data ?? null);
     if (!r.ok) setError(t('pwa.error'));
-    if (canNotes) setNotes((await api<Note[]>('GET', `/clients/${clientId}/notes`)).data ?? []);
-  }, [clientId, canNotes, t]);
+    setNotes((await api<Note[]>('GET', `/clients/${clientId}/notes`)).data ?? []);
+  }, [clientId, t]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
   async function addNote() {
-    const r = await api('POST', `/clients/${clientId}/notes`, { body: note, sensitivity: health ? 'health' : 'normal' });
+    const r = await api('POST', `/clients/${clientId}/notes`, { body: note });
     if (r.ok) {
       setNote('');
-      setHealth(false);
       await load();
     } else setError(t('pwa.error'));
+  }
+
+  async function deleteNote(id: string) {
+    if (!(await api('DELETE', `/clients/${clientId}/notes/${id}`)).ok) setError(t('pwa.error'));
+    await load();
+  }
+
+  async function setMarked(marked: boolean) {
+    if (!(await api('POST', `/clients/${clientId}/unreliable`, { marked })).ok) setError(t('pwa.error'));
+    await load();
+  }
+
+  async function setExcused(bookingId: string, excused: boolean) {
+    if (!(await api('POST', `/bookings/${bookingId}/excuse`, { excused })).ok) setError(t('pwa.error'));
+    await load();
   }
 
   async function saveBirthday() {
@@ -143,27 +162,41 @@ export function ClientCardScreen({ me, clientId, notice }: { me: Me; clientId: s
           </p>
         ))}
       <p>{t('pwa.client.stats', { completed: card.stats.completed, noShow: card.stats.noShow })}</p>
+      {card.reliability.unreliable && (
+        <p className="notice warn">
+          <strong>{t('pwa.client.unreliable')}</strong>
+          {card.reliability.visitsLeft !== null && <> · {t('pwa.client.unreliable_left', { count: card.reliability.visitsLeft })}</>}
+        </p>
+      )}
+      {canManage && !card.anonymized && (
+        <button type="button" className="chip" onClick={() => void setMarked(!card.reliability.marked)}>
+          {t(card.reliability.marked ? 'pwa.client.unmark_unreliable' : 'pwa.client.mark_unreliable')}
+        </button>
+      )}
       {card.blacklisted && <p className="notice warn">{t('pwa.client.blacklisted', { date: new Date(card.blacklisted.expiresAt).toLocaleDateString(locale) })}</p>}
       {error && <p className="notice error">{error}</p>}
 
-      {canNotes && !card.anonymized && (
+      {!card.anonymized && (
         <section>
           <h2>{t('pwa.client.notes')}</h2>
+          <p className="muted">{t(hasHealthConsent ? 'pwa.client.health_consent_yes' : 'pwa.client.health_consent_no')}</p>
           {notes.map((n) => (
             <div key={n.id} className="card">
-              {n.sensitivity === 'health' && <div className="muted">{t('pwa.client.health_note')}</div>}
               <div style={{ whiteSpace: 'pre-wrap' }}>{n.body}</div>
-              <div className="muted">{new Date(n.createdAt).toLocaleDateString(locale)}</div>
+              <div className="muted link-row">
+                <span>
+                  {n.author ? `${n.author}, ` : ''}
+                  {new Date(n.createdAt).toLocaleDateString(locale)}
+                </span>
+                {n.canDelete && (
+                  <button type="button" className="chip" aria-label={`${t('pwa.client.delete_note')}: ${n.body.slice(0, 20)}`} onClick={() => void deleteNote(n.id)}>
+                    ×
+                  </button>
+                )}
+              </div>
             </div>
           ))}
           <textarea aria-label={t('pwa.client.add_note')} value={note} maxLength={5000} onChange={(e) => setNote(e.target.value)} />
-          <p className="muted">{t('notes.health_warning')}</p>
-          {hasHealthConsent && (
-            <label className="check">
-              <input type="checkbox" checked={health} onChange={(e) => setHealth(e.target.checked)} />
-              <span>{t('pwa.client.health_note')}</span>
-            </label>
-          )}
           <button type="button" className="secondary" disabled={!note.trim()} onClick={() => void addNote()}>
             {t('pwa.client.add_note')}
           </button>
@@ -171,14 +204,26 @@ export function ClientCardScreen({ me, clientId, notice }: { me: Me; clientId: s
       )}
 
       <h2>{t('pwa.client.history')}</h2>
-      {card.bookings.map((b) => (
-        <div key={b.id} className="card">
-          <div>{formatWhen(new Date(b.startsAt), me.timeZone, locale)}</div>
-          <div className={`status ${b.status}`}>{t(`booking.status.${b.status}` as MessageKey)}</div>
-        </div>
-      ))}
+      {card.bookings.map((b) => {
+        const incident = b.status === 'no_show' || (b.status === 'cancelled_by_client' && b.lateCancel);
+        return (
+          <div key={b.id} className="card">
+            <div>{formatWhen(new Date(b.startsAt), me.timeZone, locale)}</div>
+            <div className={`status ${b.status}`}>
+              {t(`booking.status.${b.status}` as MessageKey)}
+              {b.lateCancel && ` · ${t('pwa.client.late_cancel')}`}
+              {b.excused && ` · ${t('pwa.client.excused')}`}
+            </div>
+            {incident && canManage && (
+              <button type="button" className="chip" onClick={() => void setExcused(b.id, !b.excused)}>
+                {t(b.excused ? 'pwa.client.unexcuse' : 'pwa.client.excuse')}
+              </button>
+            )}
+          </div>
+        );
+      })}
 
-      {canNotes && !card.anonymized && (
+      {canManage && !card.anonymized && (
         <button type="button" className="secondary" style={{ marginTop: 16 }} onClick={() => void toggleBlacklist()}>
           {t(card.blacklisted ? 'pwa.client.unblacklist' : 'pwa.client.blacklist')}
         </button>
