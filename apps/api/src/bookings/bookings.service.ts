@@ -260,6 +260,13 @@ export class BookingsService {
 
     const row = inserted.rows[0];
     if (!row) throw new Error('booking insert returned no row');
+    // D-068: запись к специалисту на день из периода закрывает ожидание клиента в его очереди.
+    await client.query(
+      `UPDATE waitlist_entries SET status = 'booked', updated_at = now()
+        WHERE client_id = $1 AND staff_id = $2 AND status = 'waiting'
+          AND ($3::timestamptz AT TIME ZONE (SELECT timezone FROM accounts))::date BETWEEN date_from AND date_to`,
+      [input.clientId, input.staffId, input.startsAt],
+    );
     await addEvent(client, input.accountId, row.id, 'created', actor, input.reschedule ? { status, rescheduledFrom: input.reschedule.fromId } : { status });
     return toBooking(row);
   }

@@ -12,7 +12,10 @@ export type BookingNotification =
   | { type: 'booking.rescheduled'; accountId: string; bookingId: string; fromBookingId: string }
   | { type: 'account.sms_quota'; accountId: string; month: string; percent: number }
   /** Утреннее напоминание мастерам о днях рождения клиентов (D-065), date: местная дата Account. */
-  | { type: 'account.birthdays'; accountId: string; date: string };
+  | { type: 'account.birthdays'; accountId: string; date: string }
+  /** Лист ожидания (D-068): клиент встал в очередь; освободился слот (предложение на OFFER_MINUTES). */
+  | { type: 'waitlist.joined'; accountId: string; entryId: string }
+  | { type: 'waitlist.offer'; accountId: string; offerId: string };
 
 /** Ключ события: одно и то же событие доставляется получателю один раз (notification_log, очередь). */
 export function dedupeKey(event: BookingNotification): string {
@@ -23,6 +26,10 @@ export function dedupeKey(event: BookingNotification): string {
       return `${event.type}:${event.month}`;
     case 'account.birthdays':
       return `${event.type}:${event.date}`;
+    case 'waitlist.joined':
+      return `${event.type}:${event.entryId}`;
+    case 'waitlist.offer':
+      return `${event.type}:${event.offerId}`;
     default:
       return `${event.type}:${event.bookingId}`;
   }

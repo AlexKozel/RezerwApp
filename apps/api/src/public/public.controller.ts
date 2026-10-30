@@ -3,6 +3,7 @@ import { LOCALES } from '@rezerwapp/shared';
 import { SLUG_RE } from '../catalog/catalog.service';
 import { NotFoundError } from '../errors';
 import { Input } from '../http/validate';
+import { PARTS_OF_DAY, WaitlistService } from '../waitlist/waitlist.service';
 import { ManageBookingService } from './manage-booking.service';
 import { PublicBookingService } from './public-booking.service';
 
@@ -17,7 +18,44 @@ export class PublicController {
   constructor(
     private readonly booking: PublicBookingService,
     private readonly manageBooking: ManageBookingService,
+    private readonly waitlist: WaitlistService,
   ) {}
+
+  // --- Лист ожидания (D-068) ---
+
+  /** Тело как у записи, но вместо startsAt период dateFrom..dateTo (до 31 дня) и partOfDay. */
+  @Post('staff/:slug/waitlist')
+  joinWaitlist(@Param('slug') slug: string, @Body() body: unknown, @Ip() ip: string) {
+    const input = new Input(body);
+    const request = {
+      slug: slugOf(slug),
+      serviceId: input.uuid('serviceId'),
+      variantId: input.uuid('variantId'),
+      dateFrom: input.date('dateFrom'),
+      dateTo: input.date('dateTo'),
+      partOfDay: input.optOneOf('partOfDay', PARTS_OF_DAY) ?? 'any',
+      name: input.string('name', { max: 100 }),
+      phone: input.string('phone', { max: 30 }),
+      language: input.optOneOf('language', LOCALES) ?? 'pl',
+      otpCode: input.string('otpCode', { max: 8 }),
+      acceptTerms: input.bool('acceptTerms'),
+      acceptPrivacy: input.bool('acceptPrivacy'),
+      ip,
+    };
+    input.done();
+    return this.booking.joinWaitlist(request);
+  }
+
+  @Get('waitlist/:token')
+  waitlistView(@Param('token') token: string, @Ip() ip: string) {
+    return this.waitlist.view(token, ip);
+  }
+
+  @Post('waitlist/:token/cancel')
+  @HttpCode(204)
+  async waitlistCancel(@Param('token') token: string, @Ip() ip: string): Promise<void> {
+    await this.waitlist.cancel(token, ip);
+  }
 
   @Get('staff/:slug')
   profile(@Param('slug') slug: string) {

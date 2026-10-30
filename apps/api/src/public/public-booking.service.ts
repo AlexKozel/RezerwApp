@@ -1,5 +1,5 @@
 import { randomInt } from 'node:crypto';
-import { normalizePhone, type BookingStatus, type DepositMode, type Locale } from '@rezerwapp/shared';
+import { localDate, normalizePhone, type BookingStatus, type DepositMode, type Locale } from '@rezerwapp/shared';
 import type { PoolClient } from 'pg';
 import { readPayment } from '../accounts/account-settings.service';
 import type { AvailabilityService } from '../availability/availability.service';
@@ -13,6 +13,7 @@ import type { RateLimiter } from '../rate-limit';
 import { notifySafely, type Notifier } from '../jobs/notifier';
 import type { ManageTokens } from './manage-token';
 import type { OtpVerifier } from './otp';
+import { MAX_WAITING_PER_CLIENT, checkPeriod, type PartOfDay } from '../waitlist/waitlist.service';
 
 type ConsentType = 'terms' | 'privacy' | 'health';
 
@@ -38,6 +39,23 @@ export interface PublicBookingInput {
   acceptHealth?: boolean;
   /** Клиент увидел и принял предоплату для ненадёжного клиента (ответ DEPOSIT_REQUIRED, D-066). */
   acceptDeposit?: boolean;
+  ip: string;
+  now?: Date;
+}
+
+export interface WaitlistJoinInput {
+  slug: string;
+  serviceId: string;
+  variantId: string;
+  dateFrom: string;
+  dateTo: string;
+  partOfDay: PartOfDay;
+  name: string;
+  phone: string;
+  language: Locale;
+  otpCode: string;
+  acceptTerms: boolean;
+  acceptPrivacy: boolean;
   ip: string;
   now?: Date;
 }
@@ -223,6 +241,50 @@ export class PublicBookingService {
     });
     await notifySafely(this.notifier, { type: 'booking.created', accountId, bookingId: result.bookingId, status: result.status });
     return result;
+  }
+
+  /**
+   * Постановка в лист ожидания (D-068): тот же путь, что у записи (OTP, согласия, клиент по телефону), без слота.
+   * Клиент из blacklist ставится как обычно, но предложений не получает (нейтрально, D-024).
+   */
+  async joinWaitlist(input: WaitlistJoinInput): Promise<{ waitlistToken: string }> {
+    const now = input.now ?? new Date();
+    if (!input.acceptTerms || !input.acceptPrivacy) throw new AppError('CONSENT_REQUIRED', 'Terms and privacy policy must be accepted');
+    const phone = normalizePhone(input.phone);
+    if (!phone) throw new ValidationError({ phone: 'invalid phone number' });
+    await this.limiter.hit(`waitlist:join:ip:${input.ip}`, BOOKINGS_PER_IP_HOUR, 3600);
+    if (!(await this.otp.verify(phone, input.otpCode))) throw new AppError('OTP_INVALID', 'Verification code is incorrect');
+
+    const { accountId, staffId } = await this.resolve(input.slug);
+    const entryId = await this.db.withAccount(accountId, async (client) => {
+      await this.serviceTerms(client, staffId, input.serviceId, input.variantId);
+      const staff = (await client.query<{ timezone: string; booking_horizon_days: number }>(
+        'SELECT a.timezone, s.booking_horizon_days FROM staff s JOIN accounts a ON a.id = s.account_id WHERE s.id = $1',
+        [staffId],
+      )).rows[0]!;
+      const invalid = checkPeriod(input.dateFrom, input.dateTo, localDate(now, staff.timezone), staff.booking_horizon_days);
+      if (invalid) throw new ValidationError(invalid);
+      const documents = await this.legalVersions(client, input.language, false);
+
+      const person = await this.clients.findOrCreate(client, accountId, { phone, name: input.name, language: input.language });
+      await client.query('SELECT 1 FROM clients WHERE id = $1 FOR UPDATE', [person.id]);
+      const waiting = await client.query<{ n: number }>(
+        "SELECT count(*)::int AS n FROM waitlist_entries WHERE client_id = $1 AND staff_id = $2 AND status = 'waiting'",
+        [person.id, staffId],
+      );
+      if (waiting.rows[0]!.n >= MAX_WAITING_PER_CLIENT) throw new ConflictError('WAITLIST_LIMIT', 'Too many waitlist entries');
+      const inserted = await client.query<{ id: string }>(
+        `INSERT INTO waitlist_entries (account_id, staff_id, client_id, service_id, variant_id, date_from, date_to, part_of_day)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+        [accountId, staffId, person.id, input.serviceId, input.variantId, input.dateFrom, input.dateTo, input.partOfDay],
+      );
+      for (const [type, version] of documents) {
+        await client.query('INSERT INTO consents (account_id, client_id, type, text_version) VALUES ($1, $2, $3, $4)', [accountId, person.id, type, version]);
+      }
+      return inserted.rows[0]!.id;
+    });
+    await notifySafely(this.notifier, { type: 'waitlist.joined', accountId, entryId });
+    return { waitlistToken: this.tokens.issueWaitlist(accountId, entryId) };
   }
 
   private async serviceTerms(client: PoolClient, staffId: string, serviceId: string, variantId: string): Promise<ServiceTerms> {

@@ -45,6 +45,8 @@ import { AlphaOtpVerifier, type OtpVerifier } from './public/otp';
 import { PublicController } from './public/public.controller';
 import { PublicBookingService } from './public/public-booking.service';
 import { RateLimiter } from './rate-limit';
+import { WaitlistController } from './waitlist/waitlist.controller';
+import { WaitlistService } from './waitlist/waitlist.service';
 
 /** Закрывает соединение с Redis при остановке приложения (enableShutdownHooks в main.ts). */
 @Injectable()
@@ -70,6 +72,7 @@ class RedisShutdown implements OnApplicationShutdown {
     AvailabilityController,
     BookingsController,
     PublicController,
+    WaitlistController,
   ],
   providers: [
     { provide: APP_CONFIG, useFactory: () => loadConfig() },
@@ -120,8 +123,9 @@ class RedisShutdown implements OnApplicationShutdown {
     },
     {
       provide: MaintenanceJobs,
-      useFactory: (db: DbService, bookings: BookingsService, crm: CrmService, notifier: Notifier) => new MaintenanceJobs(db, bookings, crm, notifier),
-      inject: [DbService, BookingsService, CrmService, NOTIFIER],
+      useFactory: (db: DbService, bookings: BookingsService, crm: CrmService, notifier: Notifier, waitlist: WaitlistService) =>
+        new MaintenanceJobs(db, bookings, crm, notifier, waitlist),
+      inject: [DbService, BookingsService, CrmService, NOTIFIER, WaitlistService],
     },
     {
       // При WORKERS=false фоновые задачи выполняет другой процесс; здесь планировщика нет.
@@ -172,6 +176,12 @@ class RedisShutdown implements OnApplicationShutdown {
     },
     { provide: ManageTokens, useFactory: (config: AppConfig) => new ManageTokens(config.fieldMasterKey), inject: [APP_CONFIG] },
     { provide: AnalyticsService, useFactory: (db: DbService) => new AnalyticsService(db), inject: [DbService] },
+    {
+      provide: WaitlistService,
+      useFactory: (db: DbService, availability: AvailabilityService, tokens: ManageTokens, limiter: RateLimiter) =>
+        new WaitlistService(db, availability, tokens, limiter),
+      inject: [DbService, AvailabilityService, ManageTokens, RateLimiter],
+    },
     {
       provide: LegalService,
       useFactory: (db: DbService, hasher: PhoneHasher) => new LegalService(db, hasher),

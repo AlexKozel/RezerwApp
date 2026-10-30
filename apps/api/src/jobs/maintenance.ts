@@ -2,6 +2,7 @@ import { Logger } from '@nestjs/common';
 import type { BookingsService } from '../bookings/bookings.service';
 import type { CrmService } from '../clients/crm.service';
 import type { Db } from '../db/db';
+import type { WaitlistService } from '../waitlist/waitlist.service';
 import { notifySafely, type BookingNotification, type Notifier } from './notifier';
 
 /** Через сколько минут без ответа мастеру уходит напоминание о заявке (D-017). */
@@ -14,6 +15,7 @@ export interface MaintenanceResult {
   clientReminded: number;
   blacklistPurged: number;
   birthdays: number;
+  waitlistOffers: number;
 }
 
 /**
@@ -30,11 +32,13 @@ export class MaintenanceJobs {
     private readonly bookings: BookingsService,
     private readonly crm: CrmService,
     private readonly notifier: Notifier,
+    /** Лист ожидания (D-068); без него шаг пропускается (тесты других задач). */
+    private readonly waitlist?: WaitlistService,
   ) {}
 
   async run(): Promise<MaintenanceResult> {
     const accounts = (await this.db.pool.query<{ id: string }>('SELECT id FROM jobs_accounts_with_pending() AS id')).rows;
-    const result: MaintenanceResult = { accounts: accounts.length, expired: 0, reminded: 0, clientReminded: 0, blacklistPurged: 0, birthdays: 0 };
+    const result: MaintenanceResult = { accounts: accounts.length, expired: 0, reminded: 0, clientReminded: 0, blacklistPurged: 0, birthdays: 0, waitlistOffers: 0 };
 
     // D-024: записи blacklist с истёкшим сроком удаляются, а не только перестают действовать.
     const withExpired = (await this.db.pool.query<{ id: string }>('SELECT id FROM jobs_accounts_with_expired_blacklist() AS id')).rows;
@@ -77,6 +81,20 @@ export class MaintenanceJobs {
     for (const row of birthdays) {
       result.birthdays += 1;
       await this.send({ type: 'account.birthdays', accountId: row.account_id, date: row.day });
+    }
+
+    // Лист ожидания: освободившиеся слоты предлагаются по очереди (D-068).
+    if (this.waitlist) {
+      const waiting = (await this.db.pool.query<{ id: string }>('SELECT id FROM jobs_accounts_with_waitlist() AS id')).rows;
+      for (const { id: accountId } of waiting) {
+        try {
+          const offers = await this.waitlist.process(accountId);
+          result.waitlistOffers += offers.length;
+          for (const offerId of offers) await this.send({ type: 'waitlist.offer', accountId, offerId });
+        } catch (error) {
+          this.logger.error(`account ${accountId}: waitlist: ${(error as Error).message}`);
+        }
+      }
     }
     return result;
   }

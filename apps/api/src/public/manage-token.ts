@@ -22,4 +22,20 @@ export class ManageTokens {
     if (!payload || payload.length !== 32) return null;
     return { accountId: bytesToUuid(payload.subarray(0, 16)), bookingId: bytesToUuid(payload.subarray(16)) };
   }
+
+  /**
+   * Ссылка на место в листе ожидания (D-068). Тот же ключ, другой формат: байт-префикс и длина 33, поэтому токен
+   * записи не проходит как токен очереди и наоборот.
+   */
+  issueWaitlist(accountId: string, entryId: string): string {
+    return this.tokens.sign(Buffer.concat([WAITLIST_PREFIX, uuidToBytes(accountId), uuidToBytes(entryId)]));
+  }
+
+  verifyWaitlist(token: string): { accountId: string; entryId: string } | null {
+    const payload = this.tokens.open(token);
+    if (!payload || payload.length !== 33 || payload[0] !== WAITLIST_PREFIX[0]) return null;
+    return { accountId: bytesToUuid(payload.subarray(1, 17)), entryId: bytesToUuid(payload.subarray(17)) };
+  }
 }
+
+const WAITLIST_PREFIX = Buffer.from('w');

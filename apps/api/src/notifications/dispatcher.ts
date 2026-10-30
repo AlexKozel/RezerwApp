@@ -6,6 +6,7 @@ import type { Db } from '../db/db';
 import { dedupeKey, notifySafely, type BookingNotification, type Notifier } from '../jobs/notifier';
 import { birthdaysBetween } from '../clients/crm.service';
 import type { ManageTokens } from '../public/manage-token';
+import { OFFER_MINUTES } from '../waitlist/waitlist.service';
 import { CHANNEL_ORDER, type Channel, type ChannelAdapter, type Contact } from './channels';
 import { SMS_WARN_PERCENT, chargeSms, smsUsage } from './sms-quota';
 
@@ -116,6 +117,7 @@ export class NotificationDispatcher {
     }
 
     if (event.type === 'account.birthdays') return this.birthdayReminders(client, event.date);
+    if (event.type === 'waitlist.joined' || event.type === 'waitlist.offer') return this.waitlistDeliveries(client, event);
 
     const b = await this.booking(client, event.bookingId);
     if (!b) return [];
@@ -246,7 +248,7 @@ export class NotificationDispatcher {
    * Повреждённый шифротекст (или ключ не того провайдера) не должен блокировать остальные доставки события:
    * телефон считается недоступным, ошибка логируется без данных клиента.
    */
-  private async decryptPhone(client: PoolClient, accountId: string, b: BookingContext): Promise<string | null> {
+  private async decryptPhone(client: PoolClient, accountId: string, b: Pick<BookingContext, 'client_id' | 'phone_encrypted'>): Promise<string | null> {
     try {
       return await this.cipher.decrypt(client, accountId, b.phone_encrypted);
     } catch (error) {
@@ -311,6 +313,78 @@ export class NotificationDispatcher {
       });
     }
     return deliveries;
+  }
+
+  /**
+   * Лист ожидания (D-068): подтверждение постановки со ссылкой выхода и предложение освободившегося слота со
+   * ссылкой на запись (услуга и день выбраны). Клиент уже не ждёт или предложение истекло: не отправляется.
+   */
+  private async waitlistDeliveries(
+    client: PoolClient,
+    event: Extract<BookingNotification, { type: 'waitlist.joined' | 'waitlist.offer' }>,
+  ): Promise<Delivery[]> {
+    let entryId: string;
+    let offer: { starts_at: Date; expires_at: Date } | null = null;
+    if (event.type === 'waitlist.offer') {
+      const row = (await client.query<{ entry_id: string; starts_at: Date; expires_at: Date }>(
+        'SELECT entry_id, starts_at, expires_at FROM waitlist_offers WHERE id = $1',
+        [event.offerId],
+      )).rows[0];
+      if (!row || row.expires_at <= new Date()) return [];
+      entryId = row.entry_id;
+      offer = row;
+    } else {
+      entryId = event.entryId;
+    }
+    const e = (await client.query<{
+      status: string;
+      service_id: string;
+      variant_id: string;
+      staff_name: string;
+      public_slug: string;
+      service_name: Record<string, string>;
+      client_id: string;
+      client_language: string;
+      client_email: string | null;
+      phone_encrypted: Buffer;
+      anonymized_at: Date | null;
+      timezone: string;
+    }>(
+      `SELECT e.status, e.service_id, e.variant_id, st.display_name AS staff_name, st.public_slug, sv.name_i18n AS service_name,
+              c.id AS client_id, c.language AS client_language, c.email AS client_email, c.phone_encrypted, c.anonymized_at, a.timezone
+         FROM waitlist_entries e
+         JOIN staff st ON st.id = e.staff_id
+         JOIN services sv ON sv.id = e.service_id
+         JOIN clients c ON c.id = e.client_id
+         JOIN accounts a ON a.id = e.account_id
+        WHERE e.id = $1`,
+      [entryId],
+    )).rows[0];
+    if (!e || e.status !== 'waiting' || e.anonymized_at) return [];
+    const language = lang(e.client_language);
+    const params: Record<string, string | number> = { master: e.staff_name, service: pick(e.service_name, language) };
+    let template: MessageKey;
+    if (offer) {
+      template = 'notify.client.waitlist_offer';
+      const day = new Intl.DateTimeFormat('en-CA', { timeZone: e.timezone }).format(offer.starts_at);
+      params.date = formatWhen(offer.starts_at, e.timezone, language);
+      params.minutes = OFFER_MINUTES;
+      params.link = `${this.publicUrl}/${e.public_slug}?service=${e.service_id}&variant=${e.variant_id}&date=${day}&lang=${language}`;
+    } else {
+      template = 'notify.client.waitlist_joined';
+      params.link = `${this.publicUrl}/w/${this.tokens.issueWaitlist(event.accountId, entryId)}`;
+    }
+    return [
+      {
+        kind: 'client',
+        id: e.client_id,
+        language,
+        template,
+        params,
+        contact: { email: e.client_email, phone: await this.decryptPhone(client, event.accountId, e) },
+        subjectMaster: e.staff_name,
+      },
+    ];
   }
 
   private async owners(client: PoolClient): Promise<Array<{ id: string; email: string }>> {

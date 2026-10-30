@@ -153,6 +153,14 @@ async function seed(db: Db, migrator: Pool): Promise<void> {
     await bookings.transition({ accountId, bookingId: missed.id, to: 'no_show', actor: 'master' });
   }
   await new AccountSettingsService(db).updateReliability(accountId, { depositPercent: 20 });
+  // Лист ожидания (D-068): Zofia ждёт наращивание ресниц у Anna на неделе; фоновая задача предложит ей окно.
+  await db.withAccount(accountId, (c) =>
+    c.query(
+      `INSERT INTO waitlist_entries (account_id, staff_id, client_id, service_id, variant_id, date_from, date_to, part_of_day)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'any')`,
+      [accountId, anna, ids[0], lashes.service.id, lashes.service.variants[0]!.id, addDays(today, 1), addDays(today, 7)],
+    ),
+  );
   // Сегодняшний визит, если день ещё не закончился.
   if (at(today, 16) > new Date()) await book(anna, manicure, 1, at(today, 16));
   await book(anna, henna, 2, at(addDays(today, 1), 11));
