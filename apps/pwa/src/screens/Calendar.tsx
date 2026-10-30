@@ -65,6 +65,8 @@ export function Calendar({ me }: { me: Me }) {
   const [staffId, setStaffId] = useState<string>('');
   const [bookings, setBookings] = useState<CalendarBooking[] | null>(null);
   const [requests, setRequests] = useState<CalendarBooking[]>([]);
+  // D-072: оплаты, которые мастер должен вернуть или проверить; висят, пока каждая не закрыта.
+  const [paymentsDue, setPaymentsDue] = useState<CalendarBooking[]>([]);
   const [birthdays, setBirthdays] = useState<ClientBirthday[]>([]);
   const [waitlist, setWaitlist] = useState<WaitlistItem[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -116,12 +118,19 @@ export function Calendar({ me }: { me: Me }) {
     setBirthdays(born.data ?? []);
     setWaitlist(waiting.data ?? []);
     setRequests((upcoming.data ?? []).filter((b) => b.status === 'pending'));
+    const dueList = await api<CalendarBooking[]>('GET', '/bookings/payments-due');
+    setPaymentsDue((dueList.data ?? []).filter((b) => !staffId || b.staffId === staffId));
     setError(dayList.ok ? null : t(dayList.error === 'OFFLINE' ? 'pwa.offline' : 'pwa.error'));
   }, [day, staffId, tz, t]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  async function settle(b: CalendarBooking, result: 'refunded' | 'not_received') {
+    if (!(await api('POST', `/bookings/${b.id}/payment`, { result })).ok) setError(t('pwa.error'));
+    await load();
+  }
 
   async function removeWaiting(id: string) {
     if (!(await api('DELETE', `/waitlist/${id}`)).ok) setError(t('pwa.error'));
@@ -157,6 +166,24 @@ export function Calendar({ me }: { me: Me }) {
         </div>
         {b.payment && <div className="status">{t(`pwa.pay.${b.payment.status}` as MessageKey)}</div>}
       </div>
+      {b.payment && (b.payment.status === 'to_check' || b.payment.status === 'returned') && me.role !== 'assistant' && (
+        <div className="actions">
+          <p className="muted" style={{ flexBasis: '100%', margin: 0 }}>
+            {t(b.payment.status === 'to_check' ? 'pwa.pay.to_check_hint' : 'pwa.pay.return_hint', {
+              amount: formatMoney(b.payment.amount, locale),
+              code: b.payment.code,
+            })}
+          </p>
+          <button type="button" className="primary" style={{ margin: 0 }} onClick={() => void settle(b, 'refunded')}>
+            {t('pwa.pay.refunded_btn')}
+          </button>
+          {b.payment.status === 'to_check' && (
+            <button type="button" className="secondary" onClick={() => void settle(b, 'not_received')}>
+              {t('pwa.pay.not_received_btn')}
+            </button>
+          )}
+        </div>
+      )}
       {b.status === 'pending' && (
         <div className="actions">
           {b.payment && b.payment.status === 'requested' && (
@@ -202,6 +229,13 @@ export function Calendar({ me }: { me: Me }) {
             </option>
           ))}
         </select>
+      )}
+
+      {paymentsDue.length > 0 && (
+        <section>
+          <h2>{t('pwa.cal.payments_due', { count: paymentsDue.length })}</h2>
+          {paymentsDue.map((b) => card(b, true))}
+        </section>
       )}
 
       {requests.length > 0 && (

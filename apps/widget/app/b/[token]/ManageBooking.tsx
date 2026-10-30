@@ -19,6 +19,7 @@ export function ManageBooking({ token, booking, locale }: { token: string; booki
   const tz = booking.timeZone;
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<MessageKey | null>(null);
+  const [feeNote, setFeeNote] = useState<MessageKey | null>(null);
   const [busy, setBusy] = useState(false);
   const [slots, setSlots] = useState<string[] | null>(null);
   const [day, setDay] = useState<string | null>(null);
@@ -34,10 +35,14 @@ export function ManageBooking({ token, booking, locale }: { token: string; booki
     const warning = booking.lateCancel ? `\n\n${t(locale, 'widget.cancel_late')}` : '';
     if (!window.confirm(t(locale, 'widget.cancel_confirm') + warning)) return;
     setBusy(true);
-    const r = await clientCall('POST', `/public/bookings/${token}/cancel`);
+    const r = await clientCall<{ payment: string | null }>('POST', `/public/bookings/${token}/cancel`);
     setBusy(false);
-    if (r.ok) setDone('widget.cancelled');
-    else setError(errorMessage(r.error, locale));
+    if (r.ok) {
+      setDone('widget.cancelled');
+      // D-072: что будет с оплатой, клиент узнаёт сразу.
+      const p = r.data?.payment;
+      setFeeNote(p === 'kept' ? 'widget.fee_kept' : p === 'returned' || p === 'to_check' ? 'widget.fee_will_return' : null);
+    } else setError(errorMessage(r.error, locale));
   }
 
   async function loadSlots() {
@@ -76,6 +81,9 @@ export function ManageBooking({ token, booking, locale }: { token: string; booki
         )}
       </div>
 
+      {fee && !feeNote && (fee.status === 'returned' || fee.status === 'to_check') && <p className="notice">{t(locale, 'widget.fee_will_return')}</p>}
+      {fee && fee.status === 'refunded' && <p className="notice ok">{t(locale, 'widget.fee_refunded')}</p>}
+      {feeNote && <p className="notice">{t(locale, feeNote)}</p>}
       {fee && fee.blikPhone && status === 'pending' && (
         <div className="card fee">
           <div className="muted">{t(locale, 'booking.fee.label')}</div>
