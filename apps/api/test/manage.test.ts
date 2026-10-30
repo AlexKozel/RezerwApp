@@ -214,4 +214,23 @@ describe('HTTP: перенос и отмена клиентом по ссылк�
     );
     assert.equal(count.rows[0].n, 1);
   });
+
+  test('«записаться снова» и «добавить в календарь»: услуга в ответе, .ics только для действующей записи', async () => {
+    const b = await book(free, slotAt(16 * 24 * HOUR));
+    const view = (await anon.get(`/public/bookings/${b.manageToken}`)).body;
+    assert.deepEqual([view.serviceId, view.variantId], [free.id, free.variants[0]!.id]);
+
+    const ics = await anon.get(`/public/bookings/${b.manageToken}/ics?lang=pl`);
+    assert.equal(ics.status, 200);
+    assert.match(ics.headers.get('content-type') ?? '', /text\/calendar/);
+    assert.match(ics.headers.get('content-disposition') ?? '', /attachment; filename="rezerwacja\.ics"/);
+    assert.match(ics.body, /SUMMARY:Konsultacja · Iza\r\n/);
+    assert.match(ics.body, /STATUS:CONFIRMED/);
+    // Длинные строки по RFC 5545 перенесены (CRLF + пробел): ищем в склеенном тексте.
+    assert.ok(ics.body.replace(/\r\n /g, '').includes(`/b/${b.manageToken}?lang=pl`), 'в описании ссылка управления записью');
+
+    await anon.post(`/public/bookings/${b.manageToken}/cancel`);
+    assert.deepEqual((await anon.get(`/public/bookings/${b.manageToken}/ics`)).body, { error: 'NOT_ACTIVE' });
+    assert.equal((await anon.get(`/public/bookings/${b.manageToken.slice(0, -2)}AA/ics`)).status, 404);
+  });
 });

@@ -1,4 +1,4 @@
-import type { BookingStatus } from '@rezerwapp/shared';
+import { pickText, type BookingStatus, type Locale } from '@rezerwapp/shared';
 import type { PoolClient } from 'pg';
 import type { AvailabilityService } from '../availability/availability.service';
 import type { BookingsService } from '../bookings/bookings.service';
@@ -7,6 +7,7 @@ import type { Db } from '../db/db';
 import { ConflictError, NotFoundError, ValidationError } from '../errors';
 import { notifySafely, type BookingNotification, type Notifier } from '../jobs/notifier';
 import type { RateLimiter } from '../rate-limit';
+import { buildIcs } from './ics';
 import type { ManageTokens } from './manage-token';
 
 const MANAGE_REQUESTS_PER_IP_HOUR = 120;
@@ -47,6 +48,9 @@ export interface ManagedBooking {
   staffSlug: string;
   /** Пояс Account: время визита показывается по нему, а не по браузеру. */
   timeZone: string;
+  /** Для «записаться снова»: та же услуга и вариант у того же специалиста. */
+  serviceId: string;
+  variantId: string;
   service: Record<string, string>;
   variant: Record<string, string>;
   policy: { freeCancelHours: number; maxReschedules: number; rescheduleCount: number; deadline: Date };
@@ -108,6 +112,8 @@ export class ManageBookingService {
         staffName: row.staff_name,
         staffSlug: row.staff_slug,
         timeZone: row.timezone,
+        serviceId: row.service_id,
+        variantId: row.variant_id,
         service: row.service_name,
         variant: row.variant_name,
         policy: { freeCancelHours: r.freeCancelHours, maxReschedules: r.maxReschedules, rescheduleCount: row.reschedule_count, deadline: r.deadline },
@@ -120,6 +126,29 @@ export class ManageBookingService {
           : null,
         rescheduledToToken: next ? this.tokens.issue(accountId, next.id) : null,
       };
+    });
+  }
+
+  /**
+   * Файл календаря для «Добавить в календарь» (Apple, Outlook): только для действующей записи (ждёт мастера или
+   * подтверждена). Название на языке клиента, в описании ссылка управления записью.
+   */
+  async ics(token: string, ip: string, language: Locale, publicUrl: string, now = new Date()): Promise<string> {
+    const { accountId, bookingId } = await this.open(token, ip);
+    return this.db.withAccount(accountId, async (client) => {
+      const row = await this.load(client, bookingId, false);
+      if (row.status !== 'pending' && row.status !== 'confirmed') throw new ConflictError('NOT_ACTIVE', 'The booking is not active');
+      const link = `${publicUrl}/b/${token}?lang=${language}`;
+      return buildIcs({
+        uid: `${row.id}@rezerwapp`,
+        start: row.starts_at,
+        end: row.ends_at,
+        summary: `${pickText(row.service_name, language)} · ${row.staff_name}`,
+        description: link,
+        url: link,
+        tentative: row.status === 'pending',
+        now,
+      });
     });
   }
 

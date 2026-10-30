@@ -1,6 +1,9 @@
-import { Body, Controller, Get, HttpCode, Ip, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, Ip, Param, Post, Query, Res } from '@nestjs/common';
 import { LOCALES } from '@rezerwapp/shared';
+import type { Response } from 'express';
+import { APP_CONFIG } from '../app.tokens';
 import { SLUG_RE } from '../catalog/catalog.service';
+import type { AppConfig } from '../config';
 import { NotFoundError } from '../errors';
 import { Input } from '../http/validate';
 import { PARTS_OF_DAY, WaitlistService } from '../waitlist/waitlist.service';
@@ -19,6 +22,7 @@ export class PublicController {
     private readonly booking: PublicBookingService,
     private readonly manageBooking: ManageBookingService,
     private readonly waitlist: WaitlistService,
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
   // --- Лист ожидания (D-068) ---
@@ -108,6 +112,18 @@ export class PublicController {
   @Get('bookings/:token')
   manage(@Param('token') token: string, @Ip() ip: string) {
     return this.manageBooking.view(token, ip);
+  }
+
+  /** «Добавить в календарь»: файл .ics действующей записи (?lang= язык названия услуги). */
+  @Get('bookings/:token/ics')
+  async manageIcs(@Param('token') token: string, @Query() query: unknown, @Ip() ip: string, @Res({ passthrough: true }) res: Response) {
+    const input = new Input(query);
+    const language = input.optOneOf('lang', LOCALES) ?? 'pl';
+    input.done();
+    const body = await this.manageBooking.ics(token, ip, language, this.config.publicUrl);
+    res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="rezerwacja.ics"');
+    return body;
   }
 
   @Get('bookings/:token/slots')
