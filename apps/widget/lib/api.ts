@@ -74,6 +74,22 @@ export interface BookingResult {
   unreliableVisitsLeft: number | null;
 }
 
+/** Место в листе ожидания по ссылке клиента (D-068). */
+export interface WaitlistView {
+  status: 'waiting' | 'booked' | 'cancelled' | 'expired';
+  staffName: string;
+  slug: string;
+  serviceId: string;
+  variantId: string;
+  serviceName: Record<string, string>;
+  variantName: Record<string, string>;
+  dateFrom: string;
+  dateTo: string;
+  partOfDay: 'any' | 'morning' | 'afternoon' | 'evening';
+  timeZone: string;
+  offer: { startsAt: string; expiresAt: string } | null;
+}
+
 export interface ManagedBooking {
   status: string;
   startsAt: string;

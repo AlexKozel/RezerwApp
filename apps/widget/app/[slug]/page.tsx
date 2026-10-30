@@ -30,13 +30,16 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 /** Страница специалиста (link-in-bio): серверный рендер каталога, дальше запись в браузере (BookingFlow). */
 export default async function StaffPage({ params, searchParams }: Props) {
   const { slug } = await params;
-  const locale = pickLocale((await searchParams).lang, (await headers()).get('accept-language'));
+  const query = await searchParams;
+  const locale = pickLocale(query.lang, (await headers()).get('accept-language'));
   const profile = await load(slug);
+  const one = (v: string | string[] | undefined) => (typeof v === 'string' ? v : undefined);
+  const preselect = { serviceId: one(query.service), variantId: one(query.variant), date: one(query.date) };
   return (
     <main lang={locale}>
       <LanguageSwitch path={`/${slug}`} current={locale} />
       <h1>{profile.displayName}</h1>
-      <BookingFlow slug={slug} profile={profile} locale={locale} />
+      <BookingFlow slug={slug} profile={profile} locale={locale} preselect={preselect} />
     </main>
   );
 }

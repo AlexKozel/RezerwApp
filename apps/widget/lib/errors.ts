@@ -13,6 +13,7 @@ const BY_CODE: Record<string, MessageKey> = {
   RESCHEDULE_TOO_LATE: 'booking.cancel.contact',
   RESCHEDULE_LIMIT: 'booking.cancel.contact',
   HOLD_EXPIRED: 'booking.hold.expired',
+  WAITLIST_LIMIT: 'widget.error.waitlist_limit',
 };
 
 export function errorMessage(code: string | undefined, locale: Locale): string {

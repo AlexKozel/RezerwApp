@@ -6,9 +6,18 @@ import { clientCall, type BookingResult, type PublicProfile, type PublicService 
 import { errorMessage } from '../../lib/errors';
 import { addDays, formatDayLabel, formatMoney, formatTime, formatWhen, groupByDay, localDay, pickText } from '../../lib/format';
 import { Countdown } from '../Countdown';
+import { WaitlistForm } from './WaitlistForm';
 
 /** Сколько дней вперёд показывать (один запрос слотов; API допускает до 31). */
 const DAYS_AHEAD = 14;
+const MAX_DAYS_AHEAD = 31;
+
+/** Предвыбор из ссылки (предложение листа ожидания, D-068): ?service=&variant=&date=YYYY-MM-DD. */
+export interface Preselect {
+  serviceId?: string;
+  variantId?: string;
+  date?: string;
+}
 
 type Choice = { service: PublicService; variantId: string };
 
@@ -23,9 +32,16 @@ export function feeLabel(service: PublicService, locale: Locale): string | null 
  * Запись клиента (BOOKING_FLOW.md, раздел 1): услуга → время → данные, OTP и согласия → результат.
  * Время показывается в поясе Account, а не браузера: клиент едет к мастеру в Варшаву.
  */
-export function BookingFlow({ slug, profile, locale }: { slug: string; profile: PublicProfile; locale: Locale }) {
+export function BookingFlow({ slug, profile, locale, preselect }: { slug: string; profile: PublicProfile; locale: Locale; preselect?: Preselect }) {
   const tz = profile.timeZone;
-  const [choice, setChoice] = useState<Choice | null>(null);
+  const [choice, setChoice] = useState<Choice | null>(() => {
+    const service = profile.services.find((s) => s.id === preselect?.serviceId);
+    const variant = service?.variants.find((v) => v.id === preselect?.variantId);
+    return service && variant ? { service, variantId: variant.id } : null;
+  });
+  // День из ссылки применяется один раз, к первой загрузке слотов.
+  const [wantedDay, setWantedDay] = useState<string | null>(preselect?.date && /^\d{4}-\d{2}-\d{2}$/.test(preselect.date) ? preselect.date : null);
+  const [waitlistOpen, setWaitlistOpen] = useState(false);
   const [slots, setSlots] = useState<string[] | null>(null);
   const [day, setDay] = useState<string | null>(null);
   const [slot, setSlot] = useState<string | null>(null);
@@ -51,15 +67,23 @@ export function BookingFlow({ slug, profile, locale }: { slug: string; profile: 
     setDay(null);
     setSlot(null);
     const from = localDay(new Date(), tz);
-    const to = addDays(from, DAYS_AHEAD - 1);
+    const defaultTo = addDays(from, DAYS_AHEAD - 1);
+    // День из предложения может быть дальше двух недель: расширяем окно до него (в пределах лимита API).
+    const to = wantedDay && wantedDay > defaultTo ? (wantedDay < addDays(from, MAX_DAYS_AHEAD - 1) ? wantedDay : addDays(from, MAX_DAYS_AHEAD - 1)) : defaultTo;
     void clientCall<{ slots: string[] }>('GET', `/public/staff/${slug}/slots?variantId=${choice.variantId}&from=${from}&to=${to}`).then((r) => {
       if (cancelled) return;
-      setSlots(r.data?.slots ?? []);
+      const list = r.data?.slots ?? [];
+      setSlots(list);
+      if (wantedDay) {
+        if (groupByDay(list, tz).some((d) => d.day === wantedDay)) setDay(wantedDay);
+        setWantedDay(null);
+      }
       if (!r.ok) setError(errorMessage(r.error, locale));
     });
     return () => {
       cancelled = true;
     };
+    // wantedDay читается намеренно без зависимости: он нужен только первой загрузке.
   }, [choice, slug, tz, locale]);
 
   const days = useMemo(() => groupByDay(slots ?? [], tz), [slots, tz]);
@@ -160,6 +184,14 @@ export function BookingFlow({ slug, profile, locale }: { slug: string; profile: 
                 ))}
               </div>
             </>
+          )}
+          {slots !== null && !slot && (
+            <button type="button" className="link" onClick={() => setWaitlistOpen(!waitlistOpen)}>
+              {t(locale, 'widget.waitlist_cta')}
+            </button>
+          )}
+          {waitlistOpen && !slot && (
+            <WaitlistForm slug={slug} serviceId={choice.service.id} variantId={choice.variantId} timeZone={tz} locale={locale} />
           )}
         </>
       )}
