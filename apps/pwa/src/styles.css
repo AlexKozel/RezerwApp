@@ -391,3 +391,7 @@ select.lang-select { width: auto; min-height: 36px; padding: 4px 8px; font-size:
 .badge { display: inline-block; font-size: 0.75rem; font-weight: 600; padding: 1px 8px; border-radius: 999px; margin-left: 6px; }
 .badge.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
 .option .badge { flex: none; }
+
+/* Лист ожидания в календаре дня (D-068): свёрнут, чтобы не отодвигать записи. */
+details.waitlist { margin: 12px 0; }
+details.waitlist summary { cursor: pointer; font-weight: 600; padding: 8px 0; }

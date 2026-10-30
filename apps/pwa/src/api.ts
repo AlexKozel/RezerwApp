@@ -93,6 +93,22 @@ export interface ClientSummary {
   unreliable: boolean;
 }
 
+/** Ожидающий в листе ожидания (D-068). */
+export interface WaitlistItem {
+  id: string;
+  staffId: string;
+  staffName: string;
+  clientId: string;
+  clientName: string;
+  serviceName: Record<string, string>;
+  variantName: Record<string, string>;
+  dateFrom: string;
+  dateTo: string;
+  partOfDay: 'any' | 'morning' | 'afternoon' | 'evening';
+  createdAt: string;
+  offer: { startsAt: string; expiresAt: string } | null;
+}
+
 export interface ClientBirthday {
   date: string;
   id: string;

@@ -1,6 +1,6 @@
 import { formatDayLabel, formatMoney, formatTime, localDate, pickText, type MessageKey } from '@rezerwapp/shared';
 import { useCallback, useEffect, useState } from 'react';
-import { api, type CalendarBooking, type ClientBirthday, type Me, type Staff } from '../api';
+import { api, type CalendarBooking, type ClientBirthday, type Me, type Staff, type WaitlistItem } from '../api';
 import { useT } from '../i18n';
 import { addMonths, weekDays } from '../lib/calendar';
 import { addDays, dayRange, today } from '../lib/dates';
@@ -39,6 +39,7 @@ export function Calendar({ me }: { me: Me }) {
   const [bookings, setBookings] = useState<CalendarBooking[] | null>(null);
   const [requests, setRequests] = useState<CalendarBooking[]>([]);
   const [birthdays, setBirthdays] = useState<ClientBirthday[]>([]);
+  const [waitlist, setWaitlist] = useState<WaitlistItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [view, setViewState] = useState<View>(savedView);
 
@@ -78,13 +79,15 @@ export function Calendar({ me }: { me: Me }) {
     const filter = staffId ? `&staffId=${staffId}` : '';
     const { from, to } = dayRange(day, tz);
     const ahead = dayRange(addDays(today(tz), REQUESTS_AHEAD_DAYS), tz);
-    const [dayList, upcoming, born] = await Promise.all([
+    const [dayList, upcoming, born, waiting] = await Promise.all([
       api<CalendarBooking[]>('GET', `/bookings?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}${filter}`),
       api<CalendarBooking[]>('GET', `/bookings?from=${encodeURIComponent(new Date().toISOString())}&to=${encodeURIComponent(ahead.to)}${filter}`),
       api<ClientBirthday[]>('GET', `/clients/birthdays?from=${day}`),
+      api<WaitlistItem[]>('GET', `/waitlist${staffId ? `?staffId=${staffId}` : ''}`),
     ]);
     setBookings(dayList.data ?? []);
     setBirthdays(born.data ?? []);
+    setWaitlist(waiting.data ?? []);
     setRequests((upcoming.data ?? []).filter((b) => b.status === 'pending'));
     setError(dayList.ok ? null : t(dayList.error === 'OFFLINE' ? 'pwa.offline' : 'pwa.error'));
   }, [day, staffId, tz, t]);
@@ -92,6 +95,11 @@ export function Calendar({ me }: { me: Me }) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  async function removeWaiting(id: string) {
+    if (!(await api('DELETE', `/waitlist/${id}`)).ok) setError(t('pwa.error'));
+    await load();
+  }
 
   async function act(b: CalendarBooking, to: Action) {
     if (to === 'cancelled_by_master' && !window.confirm(t('pwa.act.cancel_confirm'))) return;
@@ -198,6 +206,32 @@ export function Calendar({ me }: { me: Me }) {
         <p className="notice error" role="alert">
           {error}
         </p>
+      )}
+      {view === 'day' && waitlist.length > 0 && (
+        <details className="waitlist">
+          <summary>{t('pwa.cal.waitlist', { count: waitlist.length })}</summary>
+          {waitlist.map((w) => (
+            <div key={w.id} className="card">
+              <a href={`#/clients/${w.clientId}`}>{w.clientName}</a>
+              <div>
+                {pickText(w.serviceName, locale)}
+                {pickText(w.variantName, locale) && <span className="muted"> · {pickText(w.variantName, locale)}</span>}
+              </div>
+              <div className="muted">
+                {formatDayLabel(w.dateFrom, locale)} – {formatDayLabel(w.dateTo, locale)} · {t(`widget.part_${w.partOfDay}` as MessageKey)}
+                {!staffId && me.role !== 'staff' && ` · ${w.staffName}`}
+              </div>
+              {w.offer && (
+                <div className="status pending">
+                  {t('pwa.cal.waitlist_offer', { date: `${formatDayLabel(localDate(new Date(w.offer.startsAt), tz), locale)} ${formatTime(new Date(w.offer.startsAt), tz, locale)}` })}
+                </div>
+              )}
+              <button type="button" className="chip" onClick={() => void removeWaiting(w.id)}>
+                {t('pwa.cal.waitlist_remove')}
+              </button>
+            </div>
+          ))}
+        </details>
       )}
       {view === 'day' && birthdays.length > 0 && (
         <p className="notice birthdays">
