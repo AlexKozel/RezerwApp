@@ -97,6 +97,8 @@ export interface ManagedBooking {
   staffName: string;
   staffSlug: string;
   timeZone: string;
+  serviceId: string;
+  variantId: string;
   service: Record<string, string>;
   variant: Record<string, string>;
   policy: { freeCancelHours: number; maxReschedules: number; rescheduleCount: number; deadline: string };

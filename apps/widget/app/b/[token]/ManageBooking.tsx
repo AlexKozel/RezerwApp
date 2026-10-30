@@ -1,10 +1,13 @@
 'use client';
 
 import { t, type Locale, type MessageKey } from '@rezerwapp/shared';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { clientCall, type ManagedBooking } from '../../../lib/api';
 import { errorMessage } from '../../../lib/errors';
 import { addDays, formatDayLabel, formatMoney, formatTime, formatWhen, groupByDay, localDay, pickText } from '../../../lib/format';
+import { bookAgainUrl, forget, remember, toSaved } from '../../../lib/my-bookings';
+import { AddToCalendar } from '../../AddToCalendar';
+import { MyLink } from '../../MyLink';
 
 const DAYS_AHEAD = 14;
 
@@ -19,6 +22,9 @@ export function ManageBooking({ token, booking, locale }: { token: string; booki
   const [busy, setBusy] = useState(false);
   const [slots, setSlots] = useState<string[] | null>(null);
   const [day, setDay] = useState<string | null>(null);
+
+  // D-069: открытая ссылка записи попадает в «Мои записи» на этом телефоне.
+  useEffect(() => remember(toSaved(token, booking)), [token, booking]);
 
   const days = useMemo(() => groupByDay(slots ?? [], tz), [slots, tz]);
   const activeDay = day ?? days[0]?.day ?? null;
@@ -46,7 +52,11 @@ export function ManageBooking({ token, booking, locale }: { token: string; booki
     setBusy(true);
     const r = await clientCall<{ token: string }>('POST', `/public/bookings/${token}/reschedule`, { startsAt });
     setBusy(false);
-    if (r.ok && r.data) window.location.assign(`/b/${r.data.token}?lang=${locale}`);
+    if (r.ok && r.data) {
+      // Старая ссылка больше не нужна в списке: новая запись сохранится на своей странице.
+      forget(token);
+      window.location.assign(`/b/${r.data.token}?lang=${locale}`);
+    }
     else setError(errorMessage(r.error, locale));
   }
 
@@ -130,9 +140,25 @@ export function ManageBooking({ token, booking, locale }: { token: string; booki
         </>
       )}
 
+      {!done && (booking.status === 'pending' || booking.status === 'confirmed') && (
+        <AddToCalendar
+          token={token}
+          title={`${pickText(booking.service, locale)} · ${booking.staffName}`}
+          startsAt={booking.startsAt}
+          endsAt={booking.endsAt}
+          locale={locale}
+        />
+      )}
+      {(done || !(booking.status === 'pending' || booking.status === 'confirmed')) && (
+        <a className="secondary" style={{ display: 'block', textAlign: 'center', textDecoration: 'none', marginTop: 12 }} href={bookAgainUrl({ slug: booking.staffSlug, serviceId: booking.serviceId, variantId: booking.variantId }, locale)}>
+          {t(locale, 'widget.book_again')}
+        </a>
+      )}
+
       <p>
         <a href={`/${booking.staffSlug}?lang=${locale}`}>{booking.staffName}</a>
       </p>
+      <MyLink locale={locale} />
     </section>
   );
 }

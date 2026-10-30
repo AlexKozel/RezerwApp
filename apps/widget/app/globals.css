@@ -176,3 +176,9 @@ button.link {
 
 /* Части дня в листе ожидания: переносятся на новую строку, а не прокручиваются (длинные подписи). */
 .parts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+
+/* «Мои записи» и «Добавить в календарь» (D-069). */
+.my-link { text-align: right; margin: 0; font-size: 0.9rem; }
+.calendar-add { margin-top: 12px; }
+.calendar-add .row { gap: 8px; margin-top: 4px; }
+.calendar-add .chip { text-decoration: none; }

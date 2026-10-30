@@ -5,7 +5,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { clientCall, type BookingResult, type PublicProfile, type PublicService } from '../../lib/api';
 import { errorMessage } from '../../lib/errors';
 import { addDays, formatDayLabel, formatMoney, formatTime, formatWhen, groupByDay, localDay, pickText } from '../../lib/format';
+import { remember } from '../../lib/my-bookings';
+import { AddToCalendar } from '../AddToCalendar';
 import { Countdown } from '../Countdown';
+import { MyLink } from '../MyLink';
 import { WaitlistForm } from './WaitlistForm';
 
 /** Сколько дней вперёд показывать (один запрос слотов; API допускает до 31). */
@@ -121,6 +124,21 @@ export function BookingFlow({ slug, profile, locale, preselect }: { slug: string
     }
     setDeposit(null);
     if (r.ok && r.data) {
+      // D-069: запись сохраняется в «Мои записи» на этом телефоне.
+      const variant = choice.service.variants.find((v) => v.id === choice.variantId);
+      remember({
+        token: r.data.manageToken,
+        slug,
+        staffName: profile.displayName,
+        serviceId: choice.service.id,
+        variantId: choice.variantId,
+        service: choice.service.name,
+        variant: variant?.name ?? {},
+        startsAt: r.data.startsAt,
+        endsAt: r.data.endsAt,
+        status: r.data.status,
+        timeZone: tz,
+      });
       setResult(r.data);
       window.scrollTo({ top: 0 });
       return;
@@ -130,7 +148,10 @@ export function BookingFlow({ slug, profile, locale, preselect }: { slug: string
     if (r.error === 'SLOT_NOT_AVAILABLE' || r.error === 'SLOT_TAKEN') setChoice({ ...choice });
   }
 
-  if (result) return <Result result={result} timeZone={tz} locale={locale} />;
+  if (result && choice) {
+    const title = `${pickText(choice.service.name, locale)} · ${profile.displayName}`;
+    return <Result result={result} timeZone={tz} locale={locale} title={title} />;
+  }
 
   const legal = (type: string) => `/${slug}/legal/${type}?lang=${locale}`;
   const canBook = slot && name.trim() && phone.trim() && code.trim() && acceptTerms && acceptPrivacy && !busy;
@@ -267,7 +288,7 @@ export function BookingFlow({ slug, profile, locale, preselect }: { slug: string
 }
 
 /** Результат: подтверждено или ждёт мастера (таймер hold), инструкция оплаты BLIK, ссылка управления. */
-function Result({ result, timeZone, locale }: { result: BookingResult; timeZone: string; locale: Locale }) {
+function Result({ result, timeZone, locale, title }: { result: BookingResult; timeZone: string; locale: Locale; title: string }) {
   const fee = result.bookingFee;
   return (
     <section>
@@ -291,6 +312,8 @@ function Result({ result, timeZone, locale }: { result: BookingResult; timeZone:
         {t(locale, 'widget.manage')}
       </a>
       <p className="muted">{t(locale, 'widget.save_link')}</p>
+      <AddToCalendar token={result.manageToken} title={title} startsAt={result.startsAt} endsAt={result.endsAt} locale={locale} />
+      <MyLink locale={locale} />
     </section>
   );
 }

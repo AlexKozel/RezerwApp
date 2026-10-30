@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 import { serverGet, type PublicProfile } from '../../lib/api';
 import { pickLocale } from '../../lib/locale';
 import { LanguageSwitch } from '../LanguageSwitch';
+import { MyLink } from '../MyLink';
 import { BookingFlow } from './BookingFlow';
 
 type Props = {
@@ -38,6 +39,7 @@ export default async function StaffPage({ params, searchParams }: Props) {
   return (
     <main lang={locale}>
       <LanguageSwitch path={`/${slug}`} current={locale} />
+      <MyLink locale={locale} />
       <h1>{profile.displayName}</h1>
       <BookingFlow slug={slug} profile={profile} locale={locale} preselect={preselect} />
     </main>
