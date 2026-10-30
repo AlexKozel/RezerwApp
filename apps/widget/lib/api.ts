@@ -72,6 +72,9 @@ export interface BookingResult {
   manageToken: string;
   /** Оплата взята по правилу мастера для повторяющихся неявок: визитов до её отмены (D-066). */
   unreliableVisitsLeft: number | null;
+  /** Цена для клиента со скидкой и процент скидки (D-070). */
+  price: number | null;
+  discountPercent: number | null;
 }
 
 /** Место в листе ожидания по ссылке клиента (D-068). */
@@ -99,6 +102,8 @@ export interface ManagedBooking {
   timeZone: string;
   serviceId: string;
   variantId: string;
+  price: number | null;
+  discountPercent: number | null;
   service: Record<string, string>;
   variant: Record<string, string>;
   policy: { freeCancelHours: number; maxReschedules: number; rescheduleCount: number; deadline: string };

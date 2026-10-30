@@ -71,6 +71,9 @@ export function ManageBooking({ token, booking, locale }: { token: string; booki
           <strong>{t(locale, 'widget.when')}:</strong> {formatWhen(new Date(booking.startsAt), tz, locale)}
         </div>
         <div>{t(locale, `booking.status.${status}` as MessageKey)}</div>
+        {booking.price !== null && booking.discountPercent !== null && (
+          <div>{t(locale, 'widget.your_price', { price: formatMoney(booking.price, locale), percent: booking.discountPercent })}</div>
+        )}
       </div>
 
       {fee && fee.blikPhone && status === 'pending' && (

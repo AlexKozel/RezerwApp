@@ -298,6 +298,9 @@ function Result({ result, timeZone, locale, title }: { result: BookingResult; ti
       <p>
         <strong>{t(locale, 'widget.when')}:</strong> {formatWhen(new Date(result.startsAt), timeZone, locale)}
       </p>
+      {result.price !== null && result.discountPercent !== null && (
+        <p>{t(locale, 'widget.your_price', { price: formatMoney(result.price, locale), percent: result.discountPercent })}</p>
+      )}
       {result.holdExpiresAt && <Countdown until={result.holdExpiresAt} locale={locale} />}
       {fee && fee.blikPhone && (
         <div className="card fee">
