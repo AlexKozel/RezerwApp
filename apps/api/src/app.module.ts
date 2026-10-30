@@ -45,6 +45,8 @@ import { AlphaOtpVerifier, type OtpVerifier } from './public/otp';
 import { PublicController } from './public/public.controller';
 import { PublicBookingService } from './public/public-booking.service';
 import { RateLimiter } from './rate-limit';
+import { ExpensesController } from './expenses/expenses.controller';
+import { ExpensesService } from './expenses/expenses.service';
 import { WaitlistController } from './waitlist/waitlist.controller';
 import { WaitlistService } from './waitlist/waitlist.service';
 
@@ -73,6 +75,7 @@ class RedisShutdown implements OnApplicationShutdown {
     BookingsController,
     PublicController,
     WaitlistController,
+    ExpensesController,
   ],
   providers: [
     { provide: APP_CONFIG, useFactory: () => loadConfig() },
@@ -176,6 +179,7 @@ class RedisShutdown implements OnApplicationShutdown {
     },
     { provide: ManageTokens, useFactory: (config: AppConfig) => new ManageTokens(config.fieldMasterKey), inject: [APP_CONFIG] },
     { provide: AnalyticsService, useFactory: (db: DbService) => new AnalyticsService(db), inject: [DbService] },
+    { provide: ExpensesService, useFactory: (db: DbService) => new ExpensesService(db), inject: [DbService] },
     {
       provide: WaitlistService,
       useFactory: (db: DbService, availability: AvailabilityService, tokens: ManageTokens, limiter: RateLimiter) =>

@@ -69,6 +69,19 @@ export class BookingsController {
     return this.bookings.transition({ accountId: s.accountId, bookingId: id, to, actor: 'master', expectedVersion });
   }
 
+  /** Разовые затраты на визит (D-071). Тело: { amount: number | null }; только если Account их учитывает. */
+  @Post(':id/extra-cost')
+  @Roles(['owner', 'staff'])
+  @HttpCode(204)
+  async extraCost(@CurrentSession() s: Session, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown): Promise<void> {
+    const input = new Input(body);
+    const raw = (body ?? {}) as Record<string, unknown>;
+    const amount = raw.amount === null ? null : input.money('amount', { max: 100_000 });
+    input.done();
+    await this.access.assertBooking(s, id);
+    await this.bookings.setExtraCost(s.accountId, id, amount);
+  }
+
   /** Уважительная причина неявки или поздней отмены (D-066). Тело: { excused: true | false }. */
   @Post(':id/excuse')
   @Roles(['owner', 'staff'])

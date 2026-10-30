@@ -49,6 +49,18 @@ export class AccountSettingsService {
     });
   }
 
+  /** Финансы (D-071): учитывать ли разовые затраты на визит. */
+  async getFinance(accountId: string): Promise<{ trackVisitCosts: boolean }> {
+    return this.db.withAccount(accountId, async (client) => ({
+      trackVisitCosts: (await client.query<{ on: boolean }>('SELECT track_visit_costs AS on FROM accounts')).rows[0]!.on,
+    }));
+  }
+
+  async updateFinance(accountId: string, trackVisitCosts: boolean): Promise<{ trackVisitCosts: boolean }> {
+    await this.db.withAccount(accountId, (client) => client.query('UPDATE accounts SET track_visit_costs = $2 WHERE id = $1', [accountId, trackVisitCosts]));
+    return { trackVisitCosts };
+  }
+
   /** Скидки (D-070): может ли staff ставить скидку своим клиентам. */
   async getDiscounts(accountId: string): Promise<{ staffCanDiscount: boolean }> {
     return this.db.withAccount(accountId, async (client) => ({

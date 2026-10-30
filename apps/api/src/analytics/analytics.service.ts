@@ -1,4 +1,6 @@
+import { localDate } from '@rezerwapp/shared';
 import type { Db } from '../db/db';
+import { expenseTotals, type ExpenseTotals } from '../expenses/expenses.service';
 import { ValidationError } from '../errors';
 
 /** Максимальный период отчёта. */
@@ -33,6 +35,11 @@ export interface AnalyticsSummary {
   revenueFromPriceSnapshot: boolean;
   /** Сколько скидок дано на завершённых визитах (D-070). */
   discounts: number;
+  /** Разовые затраты на завершённые визиты (D-071); входят в себестоимость услуг. */
+  visitCosts: number;
+  /** Расходы Account за период и «осталось себе» (D-071): только для всего Account (owner), staff получает null. */
+  expenses: ExpenseTotals | null;
+  profit: number | null;
   /** Условное сравнение с комиссией маркетплейса (BOOKING_FLOW.md, раздел 9): только при заданной ставке. */
   marketplaceCommission: { percent: number; amount: number; formula: string } | null;
   services: ServiceMargin[];
@@ -92,11 +99,12 @@ export class AnalyticsService {
         completed: number;
         revenue: string;
         cost_price: string | null;
+        extra: string;
         missing_snapshot: number;
       }>(
         `SELECT s.id AS service_id, s.name_i18n, count(*)::int AS completed,
                 sum(COALESCE(b.price, ss.override_price, v.price)) AS revenue,
-                s.cost_price, count(*) FILTER (WHERE b.price IS NULL)::int AS missing_snapshot
+                s.cost_price, COALESCE(sum(b.extra_cost), 0) AS extra, count(*) FILTER (WHERE b.price IS NULL)::int AS missing_snapshot
            FROM bookings b
            JOIN services s ON s.id = b.service_id
            JOIN service_variants v ON v.id = b.variant_id
@@ -108,10 +116,18 @@ export class AnalyticsService {
       );
       const serviceRows: ServiceMargin[] = services.rows.map((r) => {
         const revenue = round2(Number(r.revenue));
-        const cost = r.cost_price === null ? null : round2(Number(r.cost_price) * r.completed);
+        // Себестоимость: материалы по услуге (cost_price × визиты) плюс разовые затраты визитов (D-071).
+        const extra = Number(r.extra);
+        const cost = r.cost_price === null && extra === 0 ? null : round2(Number(r.cost_price ?? 0) * r.completed + extra);
         return { serviceId: r.service_id, name: r.name_i18n, completed: r.completed, revenue, cost, margin: cost === null ? null : round2(revenue - cost) };
       });
       const revenue = round2(serviceRows.reduce((sum, s) => sum + s.revenue, 0));
+      // Расходы салона только для всего Account: staff видит свои визиты, но не аренду и налоги салона.
+      let expenses: ExpenseTotals | null = null;
+      if (staffIds === null) {
+        const tz = (await client.query<{ timezone: string }>('SELECT timezone FROM accounts')).rows[0]!.timezone;
+        expenses = await expenseTotals(client, localDate(from, tz), localDate(to, tz));
+      }
       const discounts = (await client.query<{ total: string | null }>(
         `SELECT sum(b.discount_amount) AS total FROM bookings b WHERE ${scope} AND b.status = 'completed'`,
         params,
@@ -131,6 +147,9 @@ export class AnalyticsService {
         revenue,
         revenueFromPriceSnapshot: services.rows.every((r) => r.missing_snapshot === 0),
         discounts: round2(Number(discounts ?? 0)),
+        visitCosts: round2(services.rows.reduce((sum, r) => sum + Number(r.extra), 0)),
+        expenses,
+        profit: expenses ? round2(revenue - serviceRows.reduce((sum, s) => sum + (s.cost ?? 0), 0) - expenses.total) : null,
         marketplaceCommission:
           commissionPercent === null
             ? null

@@ -1,6 +1,7 @@
 import { canTransition, type BookingStatus } from '@rezerwapp/shared';
 import type { PoolClient } from 'pg';
 import type { Db } from '../db/db';
+import { ConflictError } from '../errors';
 import { notifySafely, type Notifier } from '../jobs/notifier';
 import { applyDiscount, bookingDiscount, clientDiscount } from './discounts';
 import { DEFAULT_POLICY, paymentOutcome, settlePayment, type LateCancelRule } from './payments';
@@ -37,6 +38,8 @@ export interface Booking {
   /** Скидка в записи (D-070): процент и сколько злотых. */
   discountPercent: number | null;
   discountAmount: number | null;
+  /** Разовые затраты на этот визит (D-071), если Account их учитывает. */
+  extraCost: number | null;
 }
 
 /** Запись для календаря мастера. */
@@ -123,6 +126,7 @@ interface BookingRow {
   price: string | null;
   discount_percent: number | null;
   discount_amount: string | null;
+  extra_cost: string | null;
 }
 
 function toBooking(row: BookingRow): Booking {
@@ -145,6 +149,7 @@ function toBooking(row: BookingRow): Booking {
     price: row.price === null ? null : Number(row.price),
     discountPercent: row.discount_percent,
     discountAmount: row.discount_amount === null ? null : Number(row.discount_amount),
+    extraCost: row.extra_cost === null ? null : Number(row.extra_cost),
   };
 }
 
@@ -383,6 +388,18 @@ export class BookingsService {
       ...(lateCancel ? { late: true } : {}),
     });
     return toBooking(updatedRow);
+  }
+
+  /**
+   * Разовые затраты на визит (D-071): только если Account их учитывает (настройка owner). null стирает.
+   */
+  async setExtraCost(accountId: string, bookingId: string, amount: number | null): Promise<void> {
+    await this.db.withAccount(accountId, async (client) => {
+      const on = (await client.query<{ on: boolean }>('SELECT track_visit_costs AS on FROM accounts')).rows[0]?.on;
+      if (!on) throw new ConflictError('VISIT_COSTS_OFF', 'Visit costs are not tracked in this account');
+      const updated = await client.query('UPDATE bookings SET extra_cost = $2 WHERE id = $1', [bookingId, amount]);
+      if (updated.rowCount === 0) throw new NotFoundError('booking');
+    });
   }
 
   /**

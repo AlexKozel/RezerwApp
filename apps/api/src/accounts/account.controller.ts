@@ -98,6 +98,22 @@ export class AccountController {
     return this.settings.updatePayment(s.accountId, patch);
   }
 
+  /** Финансы (D-071): { trackVisitCosts } — поле «доп. затраты» у визитов. */
+  @Get('account/finance')
+  @Roles(['owner'])
+  finance(@CurrentSession() s: Session) {
+    return this.settings.getFinance(s.accountId);
+  }
+
+  @Patch('account/finance')
+  @Roles(['owner'])
+  updateFinance(@CurrentSession() s: Session, @Body() body: unknown) {
+    const input = new Input(body);
+    const trackVisitCosts = input.bool('trackVisitCosts');
+    input.done();
+    return this.settings.updateFinance(s.accountId, trackVisitCosts);
+  }
+
   /** Скидки (D-070): { staffCanDiscount } — может ли staff ставить скидку своим клиентам. */
   @Get('account/discounts')
   @Roles(['owner'])

@@ -12,6 +12,7 @@ import { FieldCipher } from '../crypto/field-cipher';
 import { EnvKeyProvider } from '../crypto/key-provider';
 import { PhoneHasher } from '../crypto/phone-hash';
 import { Db, createPool } from '../db/db';
+import { ExpensesService } from '../expenses/expenses.service';
 import { LegalService, PLATFORM_DOCUMENTS, publishLegal } from '../legal/legal.service';
 import { describeError } from './describe-error';
 
@@ -155,6 +156,11 @@ async function seed(db: Db, migrator: Pool): Promise<void> {
     await bookings.transition({ accountId, bookingId: missed.id, to: 'no_show', actor: 'master' });
   }
   await new AccountSettingsService(db).updateReliability(accountId, { depositPercent: 20 });
+  // Расходы (D-071): аренда каждый месяц и материалы; поле «доп. затраты» у визитов включено.
+  const finance = new ExpensesService(db);
+  await finance.addRecurring(accountId, { category: 'rent', amount: 1500, note: 'Lokal', dayOfMonth: 1, startsOn: `${today.slice(0, 7)}-01` });
+  await finance.add(accountId, userId, { spentOn: today, category: 'materials', amount: 230, note: 'Lakiery hybrydowe' });
+  await new AccountSettingsService(db).updateFinance(accountId, true);
   // Лист ожидания (D-068): Zofia ждёт наращивание ресниц у Anna на неделе; фоновая задача предложит ей окно.
   await db.withAccount(accountId, (c) =>
     c.query(

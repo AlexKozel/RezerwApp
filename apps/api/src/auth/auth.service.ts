@@ -116,14 +116,31 @@ export class AuthService {
   /** Данные для интерфейса мастера: Account (название, пояс, язык), email и специалист пользователя. */
   async profile(accountId: string, userId: string) {
     return this.db.withAccount(accountId, async (client) => {
-      const row = (await client.query<{ name: string; timezone: string; locale: string; email: string; staff_id: string | null; must_change_password: boolean }>(
-        `SELECT a.name, a.timezone, a.locale, u.email, s.id AS staff_id, u.must_change_password
+      const row = (await client.query<{
+        name: string;
+        timezone: string;
+        locale: string;
+        email: string;
+        staff_id: string | null;
+        must_change_password: boolean;
+        track_visit_costs: boolean;
+      }>(
+        `SELECT a.name, a.timezone, a.locale, u.email, s.id AS staff_id, u.must_change_password, a.track_visit_costs
            FROM users u JOIN accounts a ON a.id = u.account_id LEFT JOIN staff s ON s.user_id = u.id
           WHERE u.id = $1`,
         [userId],
       )).rows[0];
       return row
-        ? { accountName: row.name, timeZone: row.timezone, locale: row.locale, email: row.email, staffId: row.staff_id, mustChangePassword: row.must_change_password }
+        ? {
+            accountName: row.name,
+            timeZone: row.timezone,
+            locale: row.locale,
+            email: row.email,
+            staffId: row.staff_id,
+            mustChangePassword: row.must_change_password,
+            // D-071: показывать ли у визитов поле «доп. затраты».
+            trackVisitCosts: row.track_visit_costs,
+          }
         : null;
     });
   }
