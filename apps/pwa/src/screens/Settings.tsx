@@ -87,6 +87,30 @@ function ReliabilitySection() {
   );
 }
 
+/** Финансы (D-071, owner): поле «доп. затраты» у визитов. Новое значение видно после перезагрузки приложения. */
+function FinanceSection() {
+  const { t } = useT();
+  const [on, setOn] = useState<boolean | null>(null);
+  useEffect(() => {
+    void api<{ trackVisitCosts: boolean }>('GET', '/account/finance').then((r) => setOn(r.data?.trackVisitCosts ?? null));
+  }, []);
+  if (on === null) return null;
+  const toggle = async (value: boolean) => {
+    const r = await api<{ trackVisitCosts: boolean }>('PATCH', '/account/finance', { trackVisitCosts: value });
+    if (r.data) setOn(r.data.trackVisitCosts);
+  };
+  return (
+    <section>
+      <h2>{t('pwa.set.finance')}</h2>
+      <label className="check">
+        <input type="checkbox" checked={on} onChange={(e) => void toggle(e.target.checked)} />
+        <span>{t('pwa.set.track_visit_costs')}</span>
+      </label>
+      <a href="#/expenses">{t('pwa.stats.expenses_link')}</a>
+    </section>
+  );
+}
+
 /** Скидки (D-070, owner): разрешить наёмным мастерам ставить постоянную скидку своим клиентам. */
 function DiscountSection() {
   const { t } = useT();
@@ -266,6 +290,7 @@ export function Settings({ me, onLogout, onLocale }: { me: Me; onLogout: () => v
 
       {me.role === 'owner' && <ReliabilitySection />}
       {me.role === 'owner' && <DiscountSection />}
+      {me.role === 'owner' && <FinanceSection />}
 
       <h2>{t('widget.language')}</h2>
       <div className="days">

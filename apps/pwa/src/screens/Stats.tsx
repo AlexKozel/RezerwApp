@@ -10,6 +10,10 @@ interface Summary {
   bookingFee: { completedWithFee: number; keptOnNoShow: number; keptOnLateCancel: number };
   revenue: number;
   discounts: number;
+  visitCosts: number;
+  services: Array<{ cost: number | null }>;
+  expenses: { total: number } | null;
+  profit: number | null;
 }
 
 const pct = (r: number | null) => (r === null ? '–' : String(Math.round(r * 100)));
@@ -39,6 +43,17 @@ export function Stats({ me }: { me: Me }) {
         <p className="muted">{t('pwa.stats.no_show_split', { withFee: pct(s.noShowRate.withFee), withoutFee: pct(s.noShowRate.withoutFee) })}</p>
         <p className="stat">{t('pwa.stats.kept', { amount: formatMoney(kept, locale) })}</p>
       </div>
+      {s.expenses && s.profit !== null && (
+        <div className="card">
+          <p className="muted">{t('pwa.stats.costs', { amount: formatMoney(s.services.reduce((sum, x) => sum + (x.cost ?? 0), 0), locale) })}</p>
+          <p className="muted">{t('pwa.stats.expenses', { amount: formatMoney(s.expenses.total, locale) })}</p>
+          <p className="stat">
+            <strong>{t('pwa.stats.profit', { amount: formatMoney(s.profit, locale) })}</strong>
+          </p>
+          <a href="#/expenses">{t('pwa.stats.expenses_link')}</a>
+          <p className="muted">{t('pwa.exp.disclaimer')}</p>
+        </div>
+      )}
     </main>
   );
 }

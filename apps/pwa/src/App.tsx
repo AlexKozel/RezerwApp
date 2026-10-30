@@ -8,6 +8,7 @@ import { Catalog, ServiceEditor } from './screens/Catalog';
 import { ChangePassword } from './screens/ChangePassword';
 import { ClientCardScreen, Clients } from './screens/Clients';
 import { Documents } from './screens/Documents';
+import { Expenses } from './screens/Expenses';
 import { Login } from './screens/Login';
 import { NewBooking } from './screens/NewBooking';
 import { NewClient } from './screens/NewClient';
@@ -92,6 +93,7 @@ function Shell({ me, onLogout, onLocale }: { me: Me; onLogout: () => void; onLoc
   else if (screen === 'clients') content = <Clients />;
   else if (screen === 'new') content = <NewBooking me={me} day={param} time={extra} staffId={extra2} />;
   else if (screen === 'stats') content = <Stats me={me} />;
+  else if (screen === 'expenses' && me.role === 'owner') content = <Expenses me={me} />;
   else if (screen === 'services' && param) content = <ServiceEditor me={me} serviceId={param} />;
   else if (screen === 'services') content = <Catalog me={me} />;
   else if (screen === 'team') content = <Team me={me} />;
@@ -116,7 +118,7 @@ function Shell({ me, onLogout, onLocale }: { me: Me; onLogout: () => void; onLoc
       {content}
       <nav className="tabs" style={{ ['--tabs' as string]: tabs.length }}>
         {tabs.map(([path, label]) => (
-          <a key={path} href={`#/${path}`} aria-current={screen === path || (path === 'calendar' && screen === 'new') || (path === 'settings' && ['services', 'team', 'password'].includes(screen ?? '')) ? 'page' : undefined} onClick={() => go(path)}>
+          <a key={path} href={`#/${path}`} aria-current={screen === path || (path === 'calendar' && screen === 'new') || (path === 'settings' && ['services', 'team', 'password'].includes(screen ?? '')) || (path === 'stats' && screen === 'expenses') ? 'page' : undefined} onClick={() => go(path)}>
             {t(label)}
           </a>
         ))}

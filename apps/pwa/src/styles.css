@@ -395,3 +395,8 @@ select.lang-select { width: auto; min-height: 36px; padding: 4px 8px; font-size:
 /* Лист ожидания в календаре дня (D-068): свёрнут, чтобы не отодвигать записи. */
 details.waitlist { margin: 12px 0; }
 details.waitlist summary { cursor: pointer; font-weight: 600; padding: 8px 0; }
+
+/* Доп. затраты на визит в карточке записи (D-071). */
+.extra-cost { margin-top: 8px; align-items: flex-end; }
+.extra-cost input { max-width: 140px; }
+.status.error { color: var(--error); }

@@ -6,8 +6,35 @@ import { addMonths, weekDays } from '../lib/calendar';
 import { addDays, dayRange, today } from '../lib/dates';
 import { go } from '../router';
 import { MonthView, WeekView, type ScopeStaff } from './CalendarViews';
+import { parseAmount } from '../lib/money';
 
 type View = 'day' | 'week' | 'month';
+
+/** Разовые затраты на визит (D-071): сумма сохраняется кнопкой, пустое поле стирает. */
+function ExtraCost({ booking, onSaved }: { booking: CalendarBooking; onSaved: () => void }) {
+  const { t } = useT();
+  const [value, setValue] = useState(booking.extraCost === null ? '' : String(booking.extraCost));
+  const [failed, setFailed] = useState(false);
+  const parsed = value.trim() === '' ? null : parseAmount(value);
+  const changed = (parsed ?? null) !== booking.extraCost;
+  async function save() {
+    const r = await api('POST', `/bookings/${booking.id}/extra-cost`, { amount: parsed });
+    setFailed(!r.ok);
+    if (r.ok) onSaved();
+  }
+  return (
+    <div className="row extra-cost">
+      <div>
+        <label htmlFor={`extra-${booking.id}`}>{t('pwa.cal.extra_cost')}</label>
+        <input id={`extra-${booking.id}`} type="text" inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value)} />
+      </div>
+      <button type="button" className="secondary" disabled={!changed || (value.trim() !== '' && parsed === null)} onClick={() => void save()}>
+        {t('pwa.set.save')}
+      </button>
+      {failed && <span className="status error">{t('pwa.error')}</span>}
+    </div>
+  );
+}
 const VIEW_KEY = 'rezerwapp.calview';
 
 function savedView(): View {
@@ -144,6 +171,9 @@ export function Calendar({ me }: { me: Me }) {
             {t('pwa.act.reject')}
           </button>
         </div>
+      )}
+      {me.trackVisitCosts && me.role !== 'assistant' && (b.status === 'confirmed' || b.status === 'completed') && (
+        <ExtraCost booking={b} onSaved={() => void load()} />
       )}
       {b.status === 'confirmed' && (
         <div className="actions">

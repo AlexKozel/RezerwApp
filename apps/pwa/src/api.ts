@@ -50,6 +50,8 @@ export interface Me {
   staffId: string | null;
   /** Вход по временному паролю от owner'а: сначала смена пароля (D-061). */
   mustChangePassword: boolean;
+  /** D-071: показывать у визитов поле «доп. затраты». */
+  trackVisitCosts: boolean;
   pendingDocuments: Array<{ type: string; version: string }>;
 }
 
@@ -77,6 +79,8 @@ export interface CalendarBooking {
   price: number | null;
   /** Скидка в записи (D-070). */
   discountPercent: number | null;
+  /** Разовые затраты на визит (D-071). */
+  extraCost: number | null;
   payment: { amount: number; code: string; status: string } | null;
 }
 
