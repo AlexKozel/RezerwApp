@@ -13,3 +13,7 @@ next-env.d.ts
 
 # Генерирует next dev (Next 16.4)
 apps/widget/AGENTS.md
+
+# Секреты и копии сервера (deploy/first-run.sh, deploy/backup.sh)
+deploy/.env
+deploy/backups/

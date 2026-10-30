@@ -1,3 +1,6 @@
 * text=auto
 # Скрипты запускаются bash (в т.ч. в Linux-контейнерах с Windows-машин): только LF.
 *.sh text eol=lf
+# Конфиги сервера (D-073): Caddy и сборка образов на Linux.
+deploy/Caddyfile text eol=lf
+deploy/Dockerfile text eol=lf

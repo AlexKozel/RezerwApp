@@ -1,0 +1,41 @@
+# Два адреса на одном сервере (D-073). Оба обращаются к API через /api своего домена (D-058, D-059):
+#   {$DOMAIN}      — страницы записи клиента (виджет), ссылки мастеров вида https://домен/<slug>;
+#   app.{$DOMAIN}  — кабинет мастера (PWA).
+# Сертификаты Let's Encrypt Caddy получает и продлевает сам; для DOMAIN=localhost выдаёт локальные.
+
+{
+	email {$ACME_EMAIL:admin@example.com}
+}
+
+(common) {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+	# API снаружи доступен только через /api; адрес клиента для лимитов в X-Forwarded-For (TRUST_PROXY=1).
+	handle_path /api/* {
+		reverse_proxy api:3001
+	}
+}
+
+{$DOMAIN} {
+	import common
+	handle {
+		reverse_proxy widget:3002
+	}
+}
+
+app.{$DOMAIN} {
+	import common
+	# Service worker и манифест не кэшируются: иначе телефон долго держит старую версию приложения.
+	@fresh path /sw.js /manifest.webmanifest /index.html /
+	header @fresh Cache-Control "no-cache"
+	handle {
+		root * /srv/pwa
+		try_files {path} /index.html
+		file_server
+	}
+}

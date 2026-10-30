@@ -1,0 +1,12 @@
+# Контекст сборки deploy/Dockerfile: только исходники, без локальных зависимостей и сборок.
+**/node_modules
+**/dist
+**/.next
+**/.test-dist
+**/*.tsbuildinfo
+**/.env
+**/.env.*
+!.env.example
+deploy/backups
+.git
+apps/widget/AGENTS.md

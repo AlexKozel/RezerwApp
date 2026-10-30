@@ -1,0 +1,116 @@
+# Боевой запуск на одном VPS (D-073). Переменные из deploy/.env (создаёт deploy/first-run.sh).
+#   docker compose -f deploy/compose.yml --env-file deploy/.env up -d
+# Снаружи открыты только 80 и 443 (Caddy); база, Redis и API без портов на хосте.
+
+name: rezerwapp-prod
+
+x-api-env: &api-env
+  NODE_ENV: production
+  PORT: "3001"
+  DATABASE_URL: postgres://rezerwapp_app:${APP_DB_PASSWORD}@postgres:5432/rezerwapp
+  REDIS_URL: redis://redis:6379
+  PHONE_HASH_PEPPER: ${PHONE_HASH_PEPPER}
+  FIELD_MASTER_KEY: ${FIELD_MASTER_KEY}
+  ALPHA_OTP_CODE: ${ALPHA_OTP_CODE}
+  PUBLIC_URL: https://${DOMAIN}${PUBLIC_PORT_SUFFIX:-}
+  # Один прокси перед API (Caddy; для серверного рендера — виджет, передающий X-Forwarded-For от Caddy).
+  TRUST_PROXY: "1"
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: rezerwapp
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: rezerwapp
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rezerwapp"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    # Очереди BullMQ и сессии: данные на диск, вытеснение запрещено (иначе пропадают задачи).
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: api
+      args:
+        PUBLIC_URL: https://${DOMAIN}${PUBLIC_PORT_SUFFIX:-}
+    image: rezerwapp-api
+    restart: unless-stopped
+    environment: *api-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  widget:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: widget
+      args:
+        PUBLIC_URL: https://${DOMAIN}${PUBLIC_PORT_SUFFIX:-}
+    image: rezerwapp-widget
+    restart: unless-stopped
+    environment:
+      API_URL: http://api:3001
+    depends_on:
+      - api
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: web
+      args:
+        PUBLIC_URL: https://${DOMAIN}${PUBLIC_PORT_SUFFIX:-}
+    image: rezerwapp-web
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - caddydata:/data
+      - caddyconfig:/config
+    depends_on:
+      - api
+      - widget
+
+  # Разовые команды ролью-мигратором (миграции, create-master, legal:publish, admin). Не запускается с up:
+  #   docker compose -f deploy/compose.yml --env-file deploy/.env run --rm tools node apps/api/dist/db/migrate-cli.js
+  tools:
+    image: rezerwapp-api
+    profiles: ["tools"]
+    environment:
+      <<: *api-env
+      MIGRATOR_DATABASE_URL: postgres://rezerwapp:${POSTGRES_PASSWORD}@postgres:5432/rezerwapp
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  redisdata:
+  caddydata:
+  caddyconfig:
