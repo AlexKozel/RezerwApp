@@ -31,6 +31,8 @@ export interface AnalyticsSummary {
   /** Выручка завершённых визитов по цене на момент записи (для старых записей без снимка: текущая цена). */
   revenue: number;
   revenueFromPriceSnapshot: boolean;
+  /** Сколько скидок дано на завершённых визитах (D-070). */
+  discounts: number;
   /** Условное сравнение с комиссией маркетплейса (BOOKING_FLOW.md, раздел 9): только при заданной ставке. */
   marketplaceCommission: { percent: number; amount: number; formula: string } | null;
   services: ServiceMargin[];
@@ -110,6 +112,10 @@ export class AnalyticsService {
         return { serviceId: r.service_id, name: r.name_i18n, completed: r.completed, revenue, cost, margin: cost === null ? null : round2(revenue - cost) };
       });
       const revenue = round2(serviceRows.reduce((sum, s) => sum + s.revenue, 0));
+      const discounts = (await client.query<{ total: string | null }>(
+        `SELECT sum(b.discount_amount) AS total FROM bookings b WHERE ${scope} AND b.status = 'completed'`,
+        params,
+      )).rows[0]!.total;
 
       const attended = bookings.completed + bookings.no_show;
       const attendedWithFee = fee.completed + fee.noShow;
@@ -124,6 +130,7 @@ export class AnalyticsService {
         bookingFee: { completedWithFee: fee.completed, keptOnNoShow: keptBy('no_show'), keptOnLateCancel: keptBy('cancelled_by_client') },
         revenue,
         revenueFromPriceSnapshot: services.rows.every((r) => r.missing_snapshot === 0),
+        discounts: round2(Number(discounts ?? 0)),
         marketplaceCommission:
           commissionPercent === null
             ? null

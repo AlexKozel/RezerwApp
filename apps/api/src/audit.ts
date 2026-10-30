@@ -8,6 +8,8 @@ export type AuditAction =
   | 'client.link'
   // Ручная отметка «ненадёжный» поставлена или снята (D-066).
   | 'client.unreliable'
+  // Персональная скидка поставлена, изменена или снята (D-070).
+  | 'client.discount'
   | 'notes.read'
   | 'notes.write'
   | 'notes.delete'

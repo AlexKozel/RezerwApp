@@ -2,6 +2,7 @@ import { canTransition, type BookingStatus } from '@rezerwapp/shared';
 import type { PoolClient } from 'pg';
 import type { Db } from '../db/db';
 import { notifySafely, type Notifier } from '../jobs/notifier';
+import { applyDiscount, bookingDiscount, clientDiscount } from './discounts';
 import { DEFAULT_POLICY, paymentOutcome, settlePayment, type LateCancelRule } from './payments';
 import {
   ClientBlockedError,
@@ -31,6 +32,11 @@ export interface Booking {
   policyId: string | null;
   policyVersion: number | null;
   version: number;
+  /** Цена на момент записи, уже со скидкой (D-056, D-070); null у записей до снимка цены. */
+  price: number | null;
+  /** Скидка в записи (D-070): процент и сколько злотых. */
+  discountPercent: number | null;
+  discountAmount: number | null;
 }
 
 /** Запись для календаря мастера. */
@@ -114,6 +120,9 @@ interface BookingRow {
   version: number;
   late_cancel: boolean;
   excused_at: Date | null;
+  price: string | null;
+  discount_percent: number | null;
+  discount_amount: string | null;
 }
 
 function toBooking(row: BookingRow): Booking {
@@ -133,6 +142,9 @@ function toBooking(row: BookingRow): Booking {
     policyId: row.policy_id,
     policyVersion: row.policy_version,
     version: row.version,
+    price: row.price === null ? null : Number(row.price),
+    discountPercent: row.discount_percent,
+    discountAmount: row.discount_amount === null ? null : Number(row.discount_amount),
   };
 }
 
@@ -179,6 +191,9 @@ export class BookingsService {
     );
     const variantRow = variant.rows[0];
     if (!variantRow) throw new NotFoundError('service variant for this staff member');
+    // D-070: скидка клиента фиксируется в записи; перенос сохраняет скидку исходной записи (снимок, D-015).
+    const discount = input.reschedule ? await bookingDiscount(client, input.reschedule.fromId) : await clientDiscount(client, input.clientId);
+    const priced = applyDiscount(Number(variantRow.price), discount);
 
     const blocked = await client.query(
       `SELECT 1
@@ -227,10 +242,11 @@ export class BookingsService {
       inserted = await client.query<BookingRow>(
         `INSERT INTO bookings
            (account_id, staff_id, client_id, service_id, variant_id, starts_at, ends_at, buffer_min,
-            capacity, status, hold_expires_at, policy_id, policy_version, custom_fields, reschedule_count, rescheduled_from, price)
+            capacity, status, hold_expires_at, policy_id, policy_version, custom_fields, reschedule_count, rescheduled_from, price,
+            discount_percent, discount_amount, discount_reason)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::text,
                  CASE WHEN $10::text = 'pending' THEN now() + make_interval(mins => $11::int) END,
-                 $12, $13, $14, $15, $16, $17)
+                 $12, $13, $14, $15, $16, $17, $18, $19, $20)
          RETURNING *`,
         [
           input.accountId,
@@ -249,8 +265,11 @@ export class BookingsService {
           JSON.stringify(input.customFields ?? {}),
           input.reschedule?.count ?? 0,
           input.reschedule?.fromId ?? null,
-          // Снимок цены (D-056): персональная цена специалиста или цена варианта на момент записи.
-          variantRow.price,
+          // Снимок цены (D-056): персональная цена специалиста или цена варианта на момент записи, со скидкой (D-070).
+          priced.price,
+          discount?.percent ?? null,
+          priced.amount,
+          discount?.reason ?? null,
         ],
       );
     } catch (error) {

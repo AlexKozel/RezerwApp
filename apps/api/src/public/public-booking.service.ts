@@ -5,6 +5,7 @@ import { readPayment } from '../accounts/account-settings.service';
 import type { AvailabilityService } from '../availability/availability.service';
 import type { BookingsService } from '../bookings/bookings.service';
 import type { CatalogService } from '../catalog/catalog.service';
+import { applyDiscount, clientDiscount } from '../bookings/discounts';
 import type { ClientsService } from '../clients/clients.service';
 import type { PhoneHasher } from '../crypto/phone-hash';
 import type { Db } from '../db/db';
@@ -72,6 +73,9 @@ export interface PublicBookingResult {
   manageToken: string;
   /** Предоплата взята как с ненадёжного клиента: столько посещённых визитов до её отмены (D-066). */
   unreliableVisitsLeft: number | null;
+  /** Цена визита для клиента, уже со скидкой; discountPercent — его скидка (D-070). */
+  price: number | null;
+  discountPercent: number | null;
 }
 
 /**
@@ -190,6 +194,9 @@ export class PublicBookingService {
         "SELECT 1 FROM bookings WHERE client_id = $1 AND staff_id = $2 AND status = 'completed' LIMIT 1",
         [person.id, staffId],
       )).rowCount! > 0;
+      // D-070: процентная оплата считается от цены со скидкой клиента (фиксированная не меняется).
+      const discount = await clientDiscount(client, person.id);
+      const priceTerms: ServiceTerms = { ...terms, price: String(applyDiscount(Number(terms.price), discount).price) };
       const serviceFee = terms.deposit_mode !== 'none' && (terms.deposit_scope === 'all' || !trusted);
       // D-066: ненадёжному клиенту предоплата по правилу Account, если услуга сама её не требует.
       const reliability = (await client.query<{ visits_left: number | null; percent: number | null }>(
@@ -198,9 +205,9 @@ export class PublicBookingService {
       )).rows[0]!;
       const unreliableFee = !serviceFee && reliability.visits_left !== null && reliability.percent !== null;
       const feeTerms: ServiceTerms | null = serviceFee
-        ? terms
+        ? priceTerms
         : unreliableFee
-          ? { ...terms, deposit_mode: 'percent', deposit_value: String(reliability.percent), prepayment_method: 'manual_blik' }
+          ? { ...priceTerms, deposit_mode: 'percent', deposit_value: String(reliability.percent), prepayment_method: 'manual_blik' }
           : null;
       if (unreliableFee && !input.acceptDeposit) throw new DepositRequiredError(feeAmount(feeTerms!), reliability.visits_left!);
       const feeRequired = feeTerms !== null;
@@ -237,6 +244,8 @@ export class PublicBookingService {
         bookingFee,
         manageToken: this.tokens.issue(accountId, booking.id),
         unreliableVisitsLeft: unreliableFee ? reliability.visits_left : null,
+        price: booking.price,
+        discountPercent: booking.discountPercent,
       };
     });
     await notifySafely(this.notifier, { type: 'booking.created', accountId, bookingId: result.bookingId, status: result.status });

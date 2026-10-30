@@ -109,6 +109,7 @@ export class ClientsController {
       email: raw.email === null ? null : input.optString('email', { max: 254, pattern: EMAIL_RE }),
       language: input.optOneOf('language', LOCALES),
       birthday: raw.birthday === null ? null : input.optBirthday('birthday'),
+      discountPercent: raw.discountPercent === null ? null : input.optInt('discountPercent', { min: 1, max: 50 }),
     };
     input.done();
     await this.crm.update(await this.viewer(s), id, patch);

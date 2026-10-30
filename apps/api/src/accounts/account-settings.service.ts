@@ -49,6 +49,18 @@ export class AccountSettingsService {
     });
   }
 
+  /** Скидки (D-070): может ли staff ставить скидку своим клиентам. */
+  async getDiscounts(accountId: string): Promise<{ staffCanDiscount: boolean }> {
+    return this.db.withAccount(accountId, async (client) => ({
+      staffCanDiscount: (await client.query<{ on: boolean }>('SELECT staff_can_discount AS on FROM accounts')).rows[0]!.on,
+    }));
+  }
+
+  async updateDiscounts(accountId: string, staffCanDiscount: boolean): Promise<{ staffCanDiscount: boolean }> {
+    await this.db.withAccount(accountId, (client) => client.query('UPDATE accounts SET staff_can_discount = $2 WHERE id = $1', [accountId, staffCanDiscount]));
+    return { staffCanDiscount };
+  }
+
   async getReliability(accountId: string): Promise<ReliabilitySettings> {
     return this.db.withAccount(accountId, (client) => readReliability(client));
   }

@@ -125,6 +125,8 @@ async function seed(db: Db, migrator: Pool): Promise<void> {
 
   const tz = 'Europe/Warsaw';
   const today = localDate(new Date(), tz);
+  // Постоянная скидка 10% у Zofia (D-070): её записи ниже уже со скидкой, в виджете с её номером тоже.
+  await db.withAccount(accountId, (c) => c.query('UPDATE clients SET discount_percent = 10 WHERE id = $1', [ids[0]]));
   // Дни рождения (D-065): у Zofia сегодня (видно напоминание в календаре), у Marta через 3 дня.
   for (const [index, date] of [[0, today], [2, addDays(today, 3)]] as const) {
     await db.withAccount(accountId, (c) =>

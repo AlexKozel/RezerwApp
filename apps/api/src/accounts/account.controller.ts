@@ -98,6 +98,22 @@ export class AccountController {
     return this.settings.updatePayment(s.accountId, patch);
   }
 
+  /** Скидки (D-070): { staffCanDiscount } — может ли staff ставить скидку своим клиентам. */
+  @Get('account/discounts')
+  @Roles(['owner'])
+  discounts(@CurrentSession() s: Session) {
+    return this.settings.getDiscounts(s.accountId);
+  }
+
+  @Patch('account/discounts')
+  @Roles(['owner'])
+  updateDiscounts(@CurrentSession() s: Session, @Body() body: unknown) {
+    const input = new Input(body);
+    const staffCanDiscount = input.bool('staffCanDiscount');
+    input.done();
+    return this.settings.updateDiscounts(s.accountId, staffCanDiscount);
+  }
+
   /** «Ненадёжный клиент» (D-066): порог случаев за 12 месяцев, визитов до снятия, предоплата в % (до 50%, D-014). */
   @Get('account/reliability')
   @Roles(['owner'])

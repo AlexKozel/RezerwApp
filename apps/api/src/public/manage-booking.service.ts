@@ -32,6 +32,8 @@ interface ManagedRow {
   timezone: string;
   service_name: Record<string, string>;
   variant_name: Record<string, string>;
+  price: string | null;
+  discount_percent: number | null;
   pay_amount: string | null;
   pay_code: string | null;
   pay_status: string | null;
@@ -51,6 +53,9 @@ export interface ManagedBooking {
   /** Для «записаться снова»: та же услуга и вариант у того же специалиста. */
   serviceId: string;
   variantId: string;
+  /** Цена визита со скидкой и процент скидки (D-070). */
+  price: number | null;
+  discountPercent: number | null;
   service: Record<string, string>;
   variant: Record<string, string>;
   policy: { freeCancelHours: number; maxReschedules: number; rescheduleCount: number; deadline: Date };
@@ -114,6 +119,8 @@ export class ManageBookingService {
         timeZone: row.timezone,
         serviceId: row.service_id,
         variantId: row.variant_id,
+        price: row.price === null ? null : Number(row.price),
+        discountPercent: row.discount_percent,
         service: row.service_name,
         variant: row.variant_name,
         policy: { freeCancelHours: r.freeCancelHours, maxReschedules: r.maxReschedules, rescheduleCount: row.reschedule_count, deadline: r.deadline },
@@ -226,6 +233,7 @@ export class ManageBookingService {
   private async load(client: PoolClient, bookingId: string, lock: boolean): Promise<ManagedRow> {
     const row = (await client.query<ManagedRow>(
       `SELECT b.id, b.account_id, b.staff_id, b.client_id, b.service_id, b.variant_id, b.starts_at, b.ends_at, b.status,
+              b.price, b.discount_percent,
               b.reschedule_count, b.policy_id, b.policy_version, p.free_cancel_hours, p.max_reschedules,
               st.display_name AS staff_name, st.public_slug AS staff_slug, a.timezone, sv.name_i18n AS service_name, v.name_i18n AS variant_name,
               pr.amount AS pay_amount, pr.code AS pay_code, pr.status AS pay_status, a.blik_phone, a.payment_recipient

@@ -30,6 +30,8 @@ export interface ClientSummary {
   anonymized: boolean;
   /** Сейчас «ненадёжный» (D-066). */
   unreliable: boolean;
+  /** Персональная скидка, % (D-070). */
+  discountPercent: number | null;
 }
 
 export interface ClientCard extends ClientSummary {
@@ -42,6 +44,8 @@ export interface ClientCard extends ClientSummary {
   bookings: Array<{ id: string; staffId: string; startsAt: Date; status: string; lateCancel: boolean; excused: boolean }>;
   /** D-066: visitsLeft — сколько посещённых визитов до снятия отметки; marked — отмечен мастером вручную. */
   reliability: { unreliable: boolean; visitsLeft: number | null; marked: boolean };
+  /** Может ли этот пользователь менять скидку: owner, staff при разрешении owner (D-070). */
+  canSetDiscount: boolean;
   consents: Array<{ type: string; textVersion: string; givenAt: Date; revokedAt: Date | null }>;
 }
 
@@ -168,8 +172,17 @@ export class CrmService {
     return this.db.withAccount(viewer.accountId, async (client) => {
       const phone = query.search ? this.hasher.hashInput(query.search) : null;
       const namePattern = query.search && !phone ? `%${query.search.toLowerCase().replace(/[\\%_]/g, (m) => `\\${m}`)}%` : null;
-      const rows = await client.query<{ id: string; name: string; language: Locale; created_at: Date; anonymized_at: Date | null; unreliable: boolean }>(
-        `SELECT c.id, c.name, c.language, c.created_at, c.anonymized_at, client_unreliable_visits_left(c.id) IS NOT NULL AS unreliable
+      const rows = await client.query<{
+        id: string;
+        name: string;
+        language: Locale;
+        created_at: Date;
+        anonymized_at: Date | null;
+        unreliable: boolean;
+        discount_percent: number | null;
+      }>(
+        `SELECT c.id, c.name, c.language, c.created_at, c.anonymized_at, client_unreliable_visits_left(c.id) IS NOT NULL AS unreliable,
+                c.discount_percent
            FROM clients c
           WHERE ($1::bytea IS NULL OR c.phone_hash = $1)
             AND ($2::text IS NULL OR lower(c.name) LIKE $2)
@@ -185,6 +198,7 @@ export class CrmService {
         createdAt: r.created_at,
         anonymized: r.anonymized_at !== null,
         unreliable: r.unreliable,
+        discountPercent: r.discount_percent,
       }));
     });
   }
@@ -259,6 +273,8 @@ export class CrmService {
         anonymized: row.anonymized_at !== null,
         unreliable: visitsLeft !== null,
         reliability: { unreliable: visitsLeft !== null, visitsLeft, marked: row.unreliable_since !== null },
+        discountPercent: row.discount_percent,
+        canSetDiscount: await this.canSetDiscount(client, viewer),
         phone,
         email: row.email,
         birthday: birthdayOf(row),
@@ -277,15 +293,20 @@ export class CrmService {
     });
   }
 
-  /** undefined: поле не меняется; null у email и birthday: стереть. */
+  /** undefined: поле не меняется; null у email, birthday и discountPercent: стереть. */
   async update(
     viewer: Viewer,
     clientId: string,
-    patch: { name?: string; email?: string | null; language?: Locale; birthday?: Birthday | null },
+    patch: { name?: string; email?: string | null; language?: Locale; birthday?: Birthday | null; discountPercent?: number | null },
   ): Promise<void> {
     await this.db.withAccount(viewer.accountId, async (client) => {
       const row = await this.visible(client, viewer, clientId);
       if (row.anonymized_at) throw new ConflictError('CLIENT_ANONYMIZED', 'Client data was erased');
+      if (patch.discountPercent !== undefined) {
+        if (!(await this.canSetDiscount(client, viewer))) throw new ForbiddenError();
+        await client.query('UPDATE clients SET discount_percent = $2 WHERE id = $1', [clientId, patch.discountPercent]);
+        await audit(client, viewer.accountId, viewer.userId, 'client.discount', 'client', clientId);
+      }
       await client.query(
         `UPDATE clients SET name = COALESCE($2, name), email = CASE WHEN $3 THEN $4 ELSE email END, language = COALESCE($5, language),
                             birth_month = CASE WHEN $6 THEN $7::smallint ELSE birth_month END,
@@ -583,6 +604,7 @@ export class CrmService {
       birth_month: number | null;
       birth_day: number | null;
       unreliable_since: Date | null;
+      discount_percent: number | null;
       created_at: Date;
       anonymized_at: Date | null;
     }>(
@@ -593,6 +615,13 @@ export class CrmService {
     )).rows[0];
     if (!row) throw new NotFoundError('client');
     return row;
+  }
+
+  /** Скидку ставит owner; staff — если owner разрешил (accounts.staff_can_discount); assistant нет (D-070). */
+  private async canSetDiscount(client: PoolClient, viewer: Viewer): Promise<boolean> {
+    if (viewer.role === 'owner') return true;
+    if (viewer.role !== 'staff') return false;
+    return (await client.query<{ on: boolean }>('SELECT staff_can_discount AS on FROM accounts')).rows[0]?.on === true;
   }
 
   private async canSee(client: PoolClient, viewer: Viewer, clientId: string): Promise<boolean> {
