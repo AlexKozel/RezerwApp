@@ -60,6 +60,8 @@ pnpm demo:reset     # вернуть демо-данные в исходное �
 `packages/shared` (переводы, форматирование) перезапустите `dev:all`. Ctrl+C останавливает всё; БД и Redis
 остаются в Docker (`docker compose stop`).
 
+Развёртывание на сервер (альфа, D-073): `deploy/README.md`.
+
 ### По шагам
 
 ```bash
