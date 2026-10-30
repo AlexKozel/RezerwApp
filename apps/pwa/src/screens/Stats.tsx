@@ -9,6 +9,7 @@ interface Summary {
   noShowRate: { all: number | null; withFee: number | null; withoutFee: number | null };
   bookingFee: { completedWithFee: number; keptOnNoShow: number; keptOnLateCancel: number };
   revenue: number;
+  discounts: number;
 }
 
 const pct = (r: number | null) => (r === null ? '–' : String(Math.round(r * 100)));
@@ -31,6 +32,7 @@ export function Stats({ me }: { me: Me }) {
       <div className="card">
         <p className="stat">{t('pwa.stats.completed', { count: s.bookings.completed ?? 0 })}</p>
         <p className="stat">{t('pwa.stats.revenue', { amount: formatMoney(s.revenue, locale) })}</p>
+        {s.discounts > 0 && <p className="muted">{t('pwa.stats.discounts', { amount: formatMoney(s.discounts, locale) })}</p>}
       </div>
       <div className="card">
         <p className="stat">{t('pwa.stats.no_show', { rate: pct(s.noShowRate.all) })}</p>

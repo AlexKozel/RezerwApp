@@ -38,6 +38,7 @@ export function Clients() {
             <span>
               {c.anonymized ? '—' : c.name}
               {c.unreliable && <span className="badge warn"> {t('pwa.client.unreliable')}</span>}
+              {c.discountPercent !== null && <span className="badge"> −{c.discountPercent}%</span>}
             </span>
             <span aria-hidden="true">›</span>
           </a>
@@ -69,6 +70,7 @@ export function ClientCardScreen({ me, clientId, notice }: { me: Me; clientId: s
   const [note, setNote] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [editBirthday, setEditBirthday] = useState(false);
+  const [editDiscount, setEditDiscount] = useState(false);
   const [birthday, setBirthday] = useState<string | null>(null);
   const canManage = me.role !== 'assistant';
   const hasHealthConsent = card?.consents.some((c) => c.type === 'health' && !c.revokedAt) ?? false;
@@ -90,6 +92,12 @@ export function ClientCardScreen({ me, clientId, notice }: { me: Me; clientId: s
       setNote('');
       await load();
     } else setError(t('pwa.error'));
+  }
+
+  async function saveDiscount(percent: number | null) {
+    if (!(await api('PATCH', `/clients/${clientId}`, { discountPercent: percent })).ok) setError(t('pwa.error'));
+    setEditDiscount(false);
+    await load();
   }
 
   async function deleteNote(id: string) {
@@ -161,6 +169,33 @@ export function ClientCardScreen({ me, clientId, notice }: { me: Me; clientId: s
             </button>
           </p>
         ))}
+      {!card.anonymized && (
+        <div className="link-row">
+          <span>
+            {t('pwa.client.discount')}: {card.discountPercent !== null ? `${card.discountPercent}%` : <span className="muted">{t('pwa.client.discount_none')}</span>}
+          </span>
+          {card.canSetDiscount &&
+            (editDiscount ? (
+              <select
+                className="lang-select"
+                aria-label={t('pwa.client.discount')}
+                value={card.discountPercent ?? 0}
+                onChange={(e) => void saveDiscount(Number(e.target.value) || null)}
+              >
+                {[0, 5, 10, 15, 20, 25, 30, 40, 50].map((p) => (
+                  <option key={p} value={p}>
+                    {p === 0 ? t('pwa.client.discount_none') : `${p}%`}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <button type="button" className="chip" onClick={() => setEditDiscount(true)}>
+                {t('pwa.client.edit')}
+              </button>
+            ))}
+        </div>
+      )}
+      {editDiscount && <p className="muted">{t('pwa.client.discount_hint')}</p>}
       <p>{t('pwa.client.stats', { completed: card.stats.completed, noShow: card.stats.noShow })}</p>
       {card.reliability.unreliable && (
         <p className="notice warn">

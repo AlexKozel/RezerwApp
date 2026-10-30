@@ -75,6 +75,8 @@ export interface CalendarBooking {
   serviceName: Record<string, string>;
   variantName: Record<string, string>;
   price: number | null;
+  /** Скидка в записи (D-070). */
+  discountPercent: number | null;
   payment: { amount: number; code: string; status: string } | null;
 }
 
@@ -91,6 +93,8 @@ export interface ClientSummary {
   anonymized: boolean;
   /** «Ненадёжный» сейчас (D-066). */
   unreliable: boolean;
+  /** Персональная скидка, % (D-070). */
+  discountPercent: number | null;
 }
 
 /** Ожидающий в листе ожидания (D-068). */
@@ -125,5 +129,6 @@ export interface ClientCard extends ClientSummary {
   stats: { completed: number; noShow: number; cancelledByClient: number };
   bookings: Array<{ id: string; staffId: string; startsAt: string; status: string; lateCancel: boolean; excused: boolean }>;
   reliability: { unreliable: boolean; visitsLeft: number | null; marked: boolean };
+  canSetDiscount: boolean;
   consents: Array<{ type: string; textVersion: string; givenAt: string; revokedAt: string | null }>;
 }

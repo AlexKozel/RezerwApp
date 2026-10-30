@@ -87,6 +87,29 @@ function ReliabilitySection() {
   );
 }
 
+/** Скидки (D-070, owner): разрешить наёмным мастерам ставить постоянную скидку своим клиентам. */
+function DiscountSection() {
+  const { t } = useT();
+  const [on, setOn] = useState<boolean | null>(null);
+  useEffect(() => {
+    void api<{ staffCanDiscount: boolean }>('GET', '/account/discounts').then((r) => setOn(r.data?.staffCanDiscount ?? null));
+  }, []);
+  if (on === null) return null;
+  const toggle = async (value: boolean) => {
+    const r = await api<{ staffCanDiscount: boolean }>('PATCH', '/account/discounts', { staffCanDiscount: value });
+    if (r.data) setOn(r.data.staffCanDiscount);
+  };
+  return (
+    <section>
+      <h2>{t('pwa.set.discounts')}</h2>
+      <label className="check">
+        <input type="checkbox" checked={on} onChange={(e) => void toggle(e.target.checked)} />
+        <span>{t('pwa.set.staff_can_discount')}</span>
+      </label>
+    </section>
+  );
+}
+
 /** Адрес виджета клиента для ссылки «link in bio». */
 const PUBLIC_URL = (import.meta.env.VITE_PUBLIC_URL as string | undefined) ?? 'http://localhost:3002';
 
@@ -242,6 +265,7 @@ export function Settings({ me, onLogout, onLocale }: { me: Me; onLogout: () => v
       )}
 
       {me.role === 'owner' && <ReliabilitySection />}
+      {me.role === 'owner' && <DiscountSection />}
 
       <h2>{t('widget.language')}</h2>
       <div className="days">

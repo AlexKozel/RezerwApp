@@ -126,6 +126,7 @@ export function Calendar({ me }: { me: Me }) {
         <div className={`status ${b.status}`}>
           {t(`booking.status.${b.status}` as MessageKey)}
           {b.price !== null && ` · ${formatMoney(b.price, locale)} zł`}
+          {b.discountPercent !== null && ` (−${b.discountPercent}%)`}
         </div>
         {b.payment && <div className="status">{t(`pwa.pay.${b.payment.status}` as MessageKey)}</div>}
       </div>
