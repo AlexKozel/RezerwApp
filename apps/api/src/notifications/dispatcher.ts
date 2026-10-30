@@ -22,6 +22,8 @@ interface Delivery {
   subjectMaster: string;
   /** Дописать к тексту инструкцию оплаты (BOOKING_FLOW.md, раздел 4). */
   feeInstruction?: MessageParams;
+  /** Дописать к тексту фразу без параметров (например, о возврате оплаты, D-072). */
+  suffix?: MessageKey;
 }
 
 export interface DeliveryResult {
@@ -161,11 +163,14 @@ export class NotificationDispatcher {
       case 'booking.status_changed':
         if (b.status !== event.to) return [];
         if (event.to === 'confirmed') return [toClient('notify.client.confirmed', manageLink)];
-        if (event.to === 'rejected') return [toClient('notify.client.rejected', pageLink)];
+        // D-072: если была оплата, клиент знает, что её вернут.
+        if (event.to === 'rejected') return [toClient('notify.client.rejected', pageLink, b.pay_code ? { suffix: 'notify.client.fee_refund_note' as const } : undefined)];
         if (event.to === 'cancelled_by_master') return [toClient('notify.client.cancelled_by_master', pageLink)];
         return [];
       case 'booking.expired':
-        return b.status === 'expired' ? [toClient('notify.client.expired', pageLink)] : [];
+        return b.status === 'expired' ? [toClient('notify.client.expired', pageLink, b.pay_code ? { suffix: 'notify.client.fee_refund_note' as const } : undefined)] : [];
+      case 'payment.refunded':
+        return [toClient('notify.client.fee_refunded', manageLink)];
       case 'booking.master_reminder':
         return b.status === 'pending' ? toMasters('notify.master.reminder') : [];
       case 'booking.client_reminder':
@@ -199,6 +204,7 @@ export class NotificationDispatcher {
 
       let text = t(d.language, d.template, d.params);
       if (d.feeInstruction) text += ` ${t(d.language, 'booking.fee.instruction', d.feeInstruction)}`;
+      if (d.suffix) text += ` ${t(d.language, d.suffix)}`;
       const message = { to: d.contact, language: d.language, subject: t(d.language, 'notify.subject', { master: d.subjectMaster }), text, template: d.template, logId: log.id };
 
       let outcome: { status: DeliveryStatus; channel: Channel | null; reason: string | null; cost: number | null } = {

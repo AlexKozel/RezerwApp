@@ -10,6 +10,8 @@ export type BookingNotification =
   | { type: 'booking.client_reminder'; accountId: string; bookingId: string }
   | { type: 'booking.cancelled_by_client'; accountId: string; bookingId: string; late: boolean }
   | { type: 'booking.rescheduled'; accountId: string; bookingId: string; fromBookingId: string }
+  /** Мастер отметил, что вернул резервационную оплату (D-072). */
+  | { type: 'payment.refunded'; accountId: string; bookingId: string }
   | { type: 'account.sms_quota'; accountId: string; month: string; percent: number }
   /** Утреннее напоминание мастерам о днях рождения клиентов (D-065), date: местная дата Account. */
   | { type: 'account.birthdays'; accountId: string; date: string }

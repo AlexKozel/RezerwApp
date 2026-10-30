@@ -36,9 +36,10 @@ export function paymentOutcome(to: BookingStatus, late: boolean, rule: LateCance
 }
 
 /**
- * Применяет исход к запросу оплаты записи. «Подтверждена» ставится только из «запрошена»;
- * «удержана» и «возвращена» только из «подтверждена»: если мастер не подтвердил получение,
- * платформа не знает, были ли деньги, и статус не трогает.
+ * Применяет исход к запросу оплаты записи. «Подтверждена» ставится только из «запрошена»; «удержана» и
+ * «возвращена» из «подтверждена». Если запись закончилась (отклонение, истечение, отмена), пока оплата была
+ * «запрошена», платформа не знает, переводил ли клиент деньги: статус to_check, мастер проверяет банк и
+ * возвращает или отмечает, что перевода не было (D-072).
  */
 export async function settlePayment(
   client: PoolClient,
@@ -46,6 +47,14 @@ export async function settlePayment(
   outcome: 'confirmed' | 'kept' | 'returned' | null,
 ): Promise<string | null> {
   if (!outcome) return null;
+  if (outcome === 'returned') {
+    const updated = await client.query<{ status: string }>(
+      `UPDATE payment_requests SET status = CASE WHEN status = 'confirmed' THEN 'returned' ELSE 'to_check' END
+        WHERE booking_id = $1 AND status IN ('confirmed', 'requested') RETURNING status`,
+      [bookingId],
+    );
+    return updated.rows[0]?.status ?? null;
+  }
   const from = outcome === 'confirmed' ? 'requested' : 'confirmed';
   const updated = await client.query<{ status: string }>(
     'UPDATE payment_requests SET status = $2 WHERE booking_id = $1 AND status = $3 RETURNING status',

@@ -238,6 +238,7 @@ export class BookingsService {
       [input.staffId, startsAt, slotEnd],
     );
     for (const row of released.rows) {
+      await settlePayment(client, row.id, paymentOutcome('expired', false, DEFAULT_POLICY.depositOnLateCancel));
       await addEvent(client, input.accountId, row.id, 'status_changed', 'system', { from: 'pending', to: 'expired' });
     }
 
@@ -300,7 +301,39 @@ export class BookingsService {
    * Телефон клиента сюда не входит: он расшифровывается только в карточке клиента с записью в аудит (D-050).
    */
   async list(accountId: string, from: Date, to: Date, staffId?: string): Promise<CalendarBooking[]> {
-    return this.db.withAccount(accountId, async (client) => {
+    return this.db.withAccount(accountId, (client) =>
+      this.calendarRows(client, 'b.starts_at >= $1 AND b.starts_at < $2 AND ($3::uuid IS NULL OR b.staff_id = $3)', [from, to, staffId ?? null]),
+    );
+  }
+
+  /**
+   * Оплаты, которые мастер должен вернуть или проверить (D-072): возвращена по правилам (returned) или запись
+   * закончилась до подтверждения оплаты (to_check). Висят в календаре, пока мастер не закроет каждую.
+   */
+  async paymentsDue(accountId: string, staffId?: string): Promise<CalendarBooking[]> {
+    return this.db.withAccount(accountId, (client) =>
+      this.calendarRows(client, "pr.status IN ('returned', 'to_check') AND ($1::uuid IS NULL OR b.staff_id = $1)", [staffId ?? null]),
+    );
+  }
+
+  /**
+   * Мастер закрывает вопрос с оплатой (D-072): refunded — вернул (из returned или to_check), not_received —
+   * проверил банк, перевода не было (только из to_check). Клиенту уходит сообщение о возврате.
+   */
+  async settlePayment(accountId: string, bookingId: string, result: 'refunded' | 'not_received'): Promise<void> {
+    await this.db.withAccount(accountId, async (client) => {
+      const allowed = result === 'refunded' ? ['returned', 'to_check'] : ['to_check'];
+      const updated = await client.query(
+        'UPDATE payment_requests SET status = $2, settled_at = now() WHERE booking_id = $1 AND status = ANY($3) RETURNING id',
+        [bookingId, result, allowed],
+      );
+      if (updated.rowCount === 0) throw new ConflictError('PAYMENT_NOT_DUE', 'There is nothing to settle for this booking');
+      await addEvent(client, accountId, bookingId, 'payment_settled', 'master', { result });
+    });
+    if (result === 'refunded') await notifySafely(this.notifier, { type: 'payment.refunded', accountId, bookingId });
+  }
+
+  private async calendarRows(client: PoolClient, where: string, params: unknown[]): Promise<CalendarBooking[]> {
       const rows = await client.query<BookingRow & CalendarRow>(
         `SELECT b.*, c.name AS client_name, client_unreliable_visits_left(b.client_id) AS client_visits_left,
                 st.display_name AS staff_name, sv.name_i18n AS service_name, v.name_i18n AS variant_name,
@@ -311,9 +344,9 @@ export class BookingsService {
            JOIN services sv ON sv.id = b.service_id
            JOIN service_variants v ON v.id = b.variant_id
            LEFT JOIN payment_requests pr ON pr.booking_id = b.id
-          WHERE b.starts_at >= $1 AND b.starts_at < $2 AND ($3::uuid IS NULL OR b.staff_id = $3)
+          WHERE ${where}
           ORDER BY b.starts_at`,
-        [from, to, staffId ?? null],
+        params,
       );
       return rows.rows.map((r) => ({
         ...toBooking(r),
@@ -327,7 +360,6 @@ export class BookingsService {
         price: r.price === null ? null : Number(r.price),
         payment: r.pay_code ? { amount: Number(r.pay_amount), code: r.pay_code, status: r.pay_status! } : null,
       }));
-    });
   }
 
   /** Переводит запись в новый статус по правилам BOOKING_FLOW.md и пишет событие. */
@@ -438,6 +470,8 @@ export class BookingsService {
          SELECT account_id, id, 'status_changed', 'system', '{"from":"pending","to":"expired"}'::jsonb FROM expired
          RETURNING booking_id`,
       );
+      // Оплата истёкшей заявки (D-072): клиент мог перевести деньги, мастер должен проверить и вернуть.
+      for (const r of result.rows) await settlePayment(client, r.booking_id, paymentOutcome('expired', false, DEFAULT_POLICY.depositOnLateCancel));
       return result.rows.map((r) => r.booking_id);
     });
   }

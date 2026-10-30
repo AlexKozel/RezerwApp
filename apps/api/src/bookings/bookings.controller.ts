@@ -69,6 +69,27 @@ export class BookingsController {
     return this.bookings.transition({ accountId: s.accountId, bookingId: id, to, actor: 'master', expectedVersion });
   }
 
+  /** Оплаты к возврату или проверке (D-072); staff только по своим записям. */
+  @Get('payments-due')
+  async paymentsDue(@CurrentSession() s: Session) {
+    const scope = await this.access.scope(s);
+    if (!scope) return this.bookings.paymentsDue(s.accountId);
+    const lists = await Promise.all(scope.map((id) => this.bookings.paymentsDue(s.accountId, id)));
+    return lists.flat().sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
+  }
+
+  /** Мастер закрыл вопрос с оплатой (D-072). Тело: { result: "refunded" | "not_received" }. */
+  @Post(':id/payment')
+  @Roles(['owner', 'staff'])
+  @HttpCode(204)
+  async settlePayment(@CurrentSession() s: Session, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown): Promise<void> {
+    const input = new Input(body);
+    const result = input.oneOf('result', ['refunded', 'not_received'] as const);
+    input.done();
+    await this.access.assertBooking(s, id);
+    await this.bookings.settlePayment(s.accountId, id, result);
+  }
+
   /** Разовые затраты на визит (D-071). Тело: { amount: number | null }; только если Account их учитывает. */
   @Post(':id/extra-cost')
   @Roles(['owner', 'staff'])
